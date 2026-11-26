@@ -9,7 +9,7 @@ Console is the opinionated way to run a home on [Home Assistant](https://www.hom
 - **A chat card** for your dashboards (`custom:console-chat-card`).
 - **A Console page** in the sidebar: your plan, this month's usage, and exactly what is sent out.
 - **The link to Console's relay**, which hands this house its own short-lived model key and reads back
-  monthly totals. No message is sent to the relay or kept by Console.
+  monthly totals. No message is ever sent to the relay; the chat card's history stays on the box.
 
 ## Install
 
