@@ -57,6 +57,7 @@ def _fresh() -> dict[str, Any]:
         "phrases": {},
         "support": {"on": False, "until": None, "log": []},
         "onboarding": {"offered": False, "done": False},
+        "dashboard": {},
         "linked_at": None,
     }
 

@@ -1,0 +1,10 @@
+rebuild_dashboard:
+  name: Rebuild the Home dashboard
+  description: Build Console's Home dashboard again from the house as it is now. Replaces hand edits to that dashboard.
+  fields:
+    force:
+      name: Replace hand edits
+      description: Rebuild even if the dashboard was edited by hand since Console last wrote it.
+      default: true
+      selector:
+        boolean:

@@ -44,3 +44,5 @@ NOT_LINKED_REPLY = (
 MODEL_FAILED_REPLY = (
     "Something went wrong on my side and I didn't finish that. Nothing else changed. Try again in a moment."
 )
+
+LEARNED = "I've learned that one: from now on it runs at home, without the cloud."

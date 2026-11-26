@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import wording
+from . import dashboard, wording
 from .const import VERSION
 from .state import ConsoleData, next_reset
 
@@ -38,4 +38,6 @@ def status(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "sunrise": bool(sunrise),
         "support": {k: data.data["support"].get(k) for k in ("on", "until")},
         "onboarding": dict(data.data["onboarding"]),
+        "learned": len(data.data["learned"]),
+        "dashboard": {"url": f"/{dashboard.URL_PATH}", "written": bool((data.data.get("dashboard") or {}).get("written"))},
     }

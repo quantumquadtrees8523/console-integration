@@ -6,18 +6,22 @@ the link to Console's relay. Everything that talks to the internet lives here, n
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
+from homeassistant.core import CoreState, HomeAssistant, ServiceCall
 
-from . import relay_api, websocket_api
+from . import dashboard, relay_api, websocket_api
 from .const import DOMAIN, PANEL_URL, STATIC_URL, VERSION
+from .learned import Learned
+from .others import OtherAgents
 from .state import ConsoleData
 
+_LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.CONVERSATION, Platform.SENSOR]
 CARD_URL = f"{STATIC_URL}/console-chat-card.js?v={VERSION}"
 PANEL_JS = f"{STATIC_URL}/console-panel.js?v={VERSION}"
@@ -26,6 +30,8 @@ PANEL_JS = f"{STATIC_URL}/console-panel.js?v={VERSION}"
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = ConsoleData(hass)
     await data.async_load()
+    data.learned = Learned(hass, data)
+    data.others = OtherAgents(hass, data)
     hass.data[DOMAIN] = data
 
     if not hass.data.get(f"{DOMAIN}_served"):
@@ -50,12 +56,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    data.learned.start()
+    data.others.start()
+
+    async def build_dashboard(_event=None) -> None:
+        """Once the house's things are all loaded: make the Home dashboard, or bring it up to date."""
+        try:
+            await dashboard.ensure(hass, data)
+        except Exception:  # noqa: BLE001 (a dashboard that can't be built mustn't stop Console)
+            _LOGGER.exception("Console: the Home dashboard couldn't be built")
+
+    if hass.state is CoreState.running:
+        entry.async_create_background_task(hass, build_dashboard(), "console dashboard")
+    else:
+        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, build_dashboard))
+
+    async def rebuild(call: ServiceCall) -> None:
+        await dashboard.ensure(hass, data, force=bool(call.data.get("force", True)))
+
+    hass.services.async_register(DOMAIN, "rebuild_dashboard", rebuild)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        data = hass.data[DOMAIN]
+        data.learned.stop()
+        data.others.stop()
+        hass.services.async_remove(DOMAIN, "rebuild_dashboard")
         frontend.async_remove_panel(hass, PANEL_URL)
         await hass.data[DOMAIN].async_save_now()
     return unloaded
