@@ -10,6 +10,7 @@ same speaker from another integration.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -33,6 +34,15 @@ CONTROLS = {
     "mute": ("volume_mute", {"is_volume_muted": True}),
     "unmute": ("volume_mute", {"is_volume_muted": False}),
 }
+
+
+SPOTIFY_URI = re.compile(r"^spotify(?:--[\w-]+)?://(track|album|playlist|artist|show|episode)/([A-Za-z0-9]+)")
+ACTIVE = ("playing", "paused", "buffering")
+VIA_TWIN = (
+    "Music Assistant found this but couldn't stream it from Spotify, so it is playing through the speaker's "
+    "own Spotify link instead. Search and playlists still come from Music Assistant. To make Music Assistant "
+    "itself play Spotify, its Spotify settings need attention (Music Assistant > Settings > Music sources)."
+)
 
 
 class Refused(ValueError):
@@ -61,16 +71,93 @@ def players(hass: HomeAssistant) -> list[dict[str, Any]]:
             continue
         attrs = state.attributes
         volume = attrs.get("volume_level")
+        shown = state.state
+        if shown not in ACTIVE:  # the other copy of this speaker may be the one with music on it
+            twin = _twin(hass, {"name": state.name})
+            other = hass.states.get(twin) if twin else None
+            if other is not None and other.state in ACTIVE:
+                shown, attrs = other.state, other.attributes
         found.append(
             {
                 "name": state.name,
                 "id": entry.entity_id,
-                "state": state.state,
+                "state": shown,
                 "volume": round(volume * 100) if isinstance(volume, int | float) else None,
                 "playing": " - ".join(str(x) for x in (attrs.get("media_artist"), attrs.get("media_title")) if x) or None,
             }
         )
     return sorted(found, key=lambda p: p["name"].lower())
+
+
+def _twin(hass: HomeAssistant, player: dict[str, Any]) -> str | None:
+    """The same speaker as another integration shows it (say, the speaker maker's own), if there is one:
+    a media player with the same name that isn't Music Assistant's and isn't a music service's own entity."""
+    for entry in er.async_get(hass).entities.values():
+        if entry.domain != "media_player" or entry.platform in (MA, "spotify") or entry.disabled:
+            continue
+        state = hass.states.get(entry.entity_id)
+        if state is not None and state.name.strip().lower() == player["name"].strip().lower() and state.state != "unavailable":
+            return entry.entity_id
+    return None
+
+
+def _spotify_entry(hass: HomeAssistant) -> str | None:
+    loaded = [e for e in hass.config_entries.async_entries("spotify") if e.state.name == "LOADED"]
+    return loaded[0].entry_id if loaded else None
+
+
+def _controls(hass: HomeAssistant, player: dict[str, Any]) -> str:
+    """Which copy of the speaker to send pause, skip and volume to: Music Assistant's, unless the other
+    copy is the one with music on it right now."""
+    twin = _twin(hass, player)
+    ours = hass.states.get(player["id"])
+    theirs = hass.states.get(twin) if twin else None
+    if theirs is not None and theirs.state in ACTIVE and (ours is None or ours.state not in ACTIVE):
+        return twin
+    return player["id"]
+
+
+async def _first_uri(hass: HomeAssistant, config_entry: str, args: dict[str, Any]) -> str | None:
+    """A name turned into something playable: the best match from search."""
+    data: dict[str, Any] = {"config_entry_id": config_entry, "name": str(args.get("what") or "")}
+    if args.get("artist"):
+        data["artist"] = args["artist"]
+    if args.get("album"):
+        data["album"] = args["album"]
+    if args.get("kind") in KINDS:
+        data["media_type"] = [args["kind"]]
+    found = await _ask(hass, "search", data)
+    order = [f"{args['kind']}s"] if args.get("kind") in KINDS else ["tracks", "albums", "playlists", "artists"]
+    for kind in order:
+        for item in (found or {}).get(kind) or []:
+            if isinstance(item, dict) and item.get("uri"):
+                return str(item["uri"])
+    return None
+
+
+async def _play_on_twin(hass: HomeAssistant, player: dict[str, Any], uri: str) -> dict[str, Any] | None:
+    """Play a Spotify item on the speaker's other copy, through Home Assistant's own Spotify link."""
+    match, twin, spotify = SPOTIFY_URI.match(uri or ""), _twin(hass, player), _spotify_entry(hass)
+    if not match or not twin or not spotify:
+        return None
+    kind, item = match.group(1), match.group(2)
+    try:
+        await hass.services.async_call(
+            "media_player",
+            "play_media",
+            {
+                "entity_id": twin,
+                "media_content_id": f"spotify://{spotify.lower()}/spotify:{kind}:{item}",
+                "media_content_type": f"spotify://{kind}",
+            },
+            blocking=True,
+        )
+    except HomeAssistantError:
+        return None
+    now = await _now(hass, {"id": twin, "name": player["name"]}, want_playing=True)
+    now["result"] = "CHECKED" if now["state"] == "playing" else "NOT CONFIRMED"
+    now["note"] = VIA_TWIN
+    return now
 
 
 def _player(hass: HomeAssistant, room: str) -> dict[str, Any]:
@@ -216,8 +303,22 @@ async def run(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
         try:
             await hass.services.async_call(MA, "play_media", data, blocking=True, target={"entity_id": [player["id"]]})
         except HomeAssistantError as error:
-            raise Refused(f"Music Assistant couldn't play that: {error}. Search first and play a result's uri.") from error
+            # Found but not streamable (a music service that lets Music Assistant search but not play):
+            # try the same speaker's own link to that service before giving up.
+            uri = what if SPOTIFY_URI.match(what) else await _first_uri(hass, config_entry, args)
+            via_twin = await _play_on_twin(hass, player, uri) if uri else None
+            if via_twin is not None:
+                return via_twin
+            raise Refused(
+                f"Music Assistant couldn't play that: {error}. It found the item but its music service didn't "
+                "let it stream, and this speaker has no other link to that service to fall back on."
+            ) from error
         now = await _now(hass, player, want_playing=True)
+        if now["state"] != "playing":
+            uri = what if SPOTIFY_URI.match(what) else await _first_uri(hass, config_entry, args)
+            via_twin = await _play_on_twin(hass, player, uri) if uri else None
+            if via_twin is not None:
+                return via_twin
         now["result"] = "CHECKED" if now["state"] == "playing" else "NOT CONFIRMED"
         return now
 
@@ -226,6 +327,18 @@ async def run(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
         target = _player(hass, str(args.get("to") or ""))
         if source["id"] == target["id"]:
             raise Refused("That's the same speaker.")
+        playing_on, other = _controls(hass, source), _twin(hass, target)
+        if playing_on != source["id"] and other:
+            # The music is on the speakers' other copies: group the target in, then drop the source out.
+            try:
+                await hass.services.async_call("media_player", "join", {"entity_id": playing_on, "group_members": [other]}, blocking=True)
+                await asyncio.sleep(1.5)
+                await hass.services.async_call("media_player", "unjoin", {"entity_id": playing_on}, blocking=True)
+            except HomeAssistantError as error:
+                raise Refused(f"The speakers couldn't hand the music over: {error}") from error
+            now = await _now(hass, {"id": other, "name": target["name"]}, want_playing=True)
+            now["result"] = "CHECKED" if now["state"] == "playing" else "NOT CONFIRMED"
+            return now | {"moved_from": source["name"]}
         await _ask_plain(hass, "transfer_queue", {"source_player": source["id"], "auto_play": True}, target["id"])
         now = await _now(hass, target, want_playing=True)
         now["result"] = "CHECKED" if now["state"] == "playing" else "NOT CONFIRMED"
@@ -245,12 +358,13 @@ async def run(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
             service, data = CONTROLS[action]
         else:
             raise Refused(f"action is one of: {', '.join([*CONTROLS, 'volume', 'seek'])}.")
+        where = _controls(hass, player)
         try:
-            await hass.services.async_call("media_player", service, {"entity_id": player["id"], **data}, blocking=True)
+            await hass.services.async_call("media_player", service, {"entity_id": where, **data}, blocking=True)
         except HomeAssistantError as error:
             raise Refused(f"The {player['name']} speaker refused: {error}") from error
         await asyncio.sleep(0.6)
-        return await _now(hass, player)
+        return await _now(hass, {"id": where, "name": player["name"]})
 
     raise Refused("op is one of: speakers, search, library, play, queue, move, control.")
 

@@ -132,3 +132,49 @@ async def test_about_gives_console_its_own_facts(hass, console):
     assert facts["off_switches"]["Cloud access"]["on"] is True and facts["versions"]["console"]
     assert any("music" in line for line in facts["this_chat_can"]) and "console_handoff" in facts["when_it_cannot"]
     assert "$" not in json.dumps(facts["plan"]["credits_a_month"])
+
+
+async def test_when_music_assistant_cannot_stream_it_the_speakers_own_spotify_link_plays_it(hass, console, speakers):
+    """Music Assistant can search Spotify but its engine can't always play it. The same speaker through
+    its maker's integration, with Home Assistant's own Spotify link, can."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry, asked = speakers
+    mock_integration(hass, MockModule("spotify"))
+    spotify = MockConfigEntry(domain="spotify", title="Spotify", state=ConfigEntryState.LOADED, entry_id="01M5JA6N4MZRBJBV6QBSD3SG67")
+    spotify.add_to_hass(hass)
+
+    async def cannot_stream(call: ServiceCall) -> None:
+        raise HomeAssistantError("The requested media item could not be found.")
+
+    hass.services.async_register("music_assistant", "play_media", cannot_stream)
+    played = []
+
+    async def sonos_plays(call: ServiceCall) -> None:
+        played.append(call.data)
+        hass.states.async_set("media_player.kitchen_kitchen", "playing", {"friendly_name": "Kitchen", "media_title": "redrum", "media_artist": "21 Savage", "volume_level": 0.15})
+
+    hass.services.async_register("media_player", "play_media", sonos_plays)
+    async_mock_service(hass, "media_player", "volume_set")
+    now = await music.run(hass, {"op": "play", "what": "redrum", "artist": "21 Savage", "room": "kitchen", "volume": 15})
+    assert played[0]["entity_id"] == "media_player.kitchen_kitchen"
+    assert played[0]["media_content_id"] == "spotify://01m5ja6n4mzrbjbv6qbsd3sg67/spotify:track:1"
+    assert played[0]["media_content_type"] == "spotify://track"
+    assert now["result"] == "CHECKED" and now["title"] == "redrum" and "own Spotify link" in now["note"]
+
+    # Pause and skip now go to the copy of the speaker that has the music.
+    paused = async_mock_service(hass, "media_player", "media_pause")
+    await music.run(hass, {"op": "control", "room": "Kitchen", "action": "pause"})
+    assert paused[0].data["entity_id"] == "media_player.kitchen_kitchen"
+    assert [p["state"] for p in music.players(hass) if p["name"] == "Kitchen"] == ["playing"]
+
+
+async def test_with_no_other_link_a_stream_failure_is_said_plainly(hass, console, speakers):
+    from homeassistant.exceptions import HomeAssistantError
+
+    async def cannot_stream(call: ServiceCall) -> None:
+        raise HomeAssistantError("The requested media item could not be found.")
+
+    hass.services.async_register("music_assistant", "play_media", cannot_stream)
+    with pytest.raises(music.Refused, match="didn't let it stream"):
+        await music.run(hass, {"op": "play", "what": "redrum", "room": "living room"})
