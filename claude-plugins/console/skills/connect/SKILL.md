@@ -18,17 +18,22 @@ Never type, print or ask for a password or token. Every sign-in below is the own
    ```bash
    claude mcp add --transport http --scope user console https://console-home.fly.dev/api/mcp/sunrise
    ```
-2. Sign in: inside Claude Code run `/mcp`, pick **console**, choose **Authenticate**. Or from a shell:
-   ```bash
-   claude mcp login console
-   ```
+2. Sign in: inside Claude Code run `/mcp`, pick **console**, choose **Authenticate**. Every version has
+   this. Newer versions can also do it from a shell (`claude mcp login console`); run `claude mcp --help`
+   first, and if `login` isn't listed (2.1.56 doesn't have it), don't suggest it.
    A browser opens at the relay.
    - If they aren't signed in there yet: **Sign in with Google**. The page then goes on by itself.
    - Home Assistant's login appears: their Home Assistant username and password. This is the
      account Claude will act as; an administrator's account lets Claude change things, any other
      account can only read.
    - The browser says it can be closed.
-3. Check: `claude mcp list` shows `console: … ✔ Connected`. In a session, `/mcp` lists the tools:
+3. Check: `claude mcp list` shows `console: … ✔ Connected`. Before sign-in it shows `! Needs
+   authentication`. If it shows `✗ Failed to connect`, run `claude --debug mcp get console` and read the
+   newest file in `~/.claude/debug/` for the lines about `MCP server "console"`: "does not support
+   dynamic client registration" with "Returning cached discovery state" means Claude Code is holding
+   an old copy of the relay's sign-in details, and `claude mcp remove console -s user` followed by the
+   `add` line above clears it.
+   Once connected, `/mcp` in a session lists the tools:
    `house_map`, `act`, `audit`, `diagnose_device`, `fix_device`, `routine`, `registry_edit`, `changes`,
    `undo`, `backup`, `memory_read`, `memory_write`, `memory_list`, `memory_delete`, `get_skill`,
    `list_skills`, `skill_update`, `behavior_log`, `behavior_revert`, `network_check`, `usage`,
@@ -36,7 +41,8 @@ Never type, print or ask for a password or token. Every sign-in below is the own
 4. Verify with a read that changes nothing: ask "use the console tools to tell me how many rooms this
    house has". It should call `house_map`.
 
-To disconnect: `claude mcp logout console`, then `claude mcp remove console`.
+To disconnect: `/mcp` → **console** → **Clear authentication** (or `claude mcp logout console` where
+that command exists), then `claude mcp remove console -s user`.
 
 ## Claude on the web, desktop and phone (a custom connector)
 
