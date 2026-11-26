@@ -388,9 +388,21 @@ class ConsoleChatCard extends HTMLElement {
   }
 }
 
-if (!customElements.get("console-chat-card")) {
-  customElements.define("console-chat-card", ConsoleChatCard);
-  window.customCards = window.customCards || [];
+// Home Assistant swaps in its own element registry while it starts. A card that registered before the
+// swap is gone afterwards, and the dashboard shows "Configuration error" in its place. So: register,
+// then look again a few times and register again if the card has been dropped.
+const NAME = "console-chat-card";
+function register() {
+  if (customElements.get(NAME)) return;
+  try { customElements.define(NAME, class extends ConsoleChatCard {}); } catch (e) { /* another copy got there first */ }
+}
+register();
+for (const wait of [0, 300, 1000, 2500, 6000, 15000]) setTimeout(register, wait);
+window.addEventListener("load", register);
+document.addEventListener("visibilitychange", register);
+
+window.customCards = window.customCards || [];
+if (!window.customCards.some((card) => card.type === NAME)) {
   window.customCards.push({
     type: "console-chat-card",
     name: "Console chat",
