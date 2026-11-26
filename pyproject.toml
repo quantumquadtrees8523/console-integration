@@ -5,3 +5,6 @@ target-version = "py314"
 [tool.ruff.lint]
 select = ["E", "F", "B", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"claude-plugins/*" = ["E702", "E401"]  # the helper script is copied from Sunrise as it is

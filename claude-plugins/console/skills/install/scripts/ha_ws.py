@@ -12,7 +12,9 @@ lowercase substring, trimmed to the HACS repository fields that matter.
 Uses aiohttp, which the official HA image already has. max_msg_size=0 because
 hacs/repositories/list is ~4.9 MB, over aiohttp's 4 MB default.
 """
-import asyncio, json, sys
+import asyncio
+import json
+import sys
 import aiohttp
 
 KEYS = ("id", "full_name", "category", "installed", "available_version",
