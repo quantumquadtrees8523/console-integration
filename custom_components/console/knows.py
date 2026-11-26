@@ -91,3 +91,22 @@ async def memory_delete(hass: HomeAssistant, name: str) -> None:
     if store is None:
         raise ValueError("Sunrise isn't installed, so there's no memory to change.")
     await hass.async_add_executor_job(lambda: store.memory_delete(name, author=AUTHOR, reason=REASON))
+
+
+async def onboarding(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
+    """How far Sunrise's welcome got, read from the first line of its own note (onboarding.md), and
+    whether the chat card has offered it yet."""
+    store = sunrise_store(hass)
+    line = ""
+    if store is not None:
+        files = await hass.async_add_executor_job(store.memory_list)
+        line = next((f.get("first_line") or "" for f in files if f.get("name") == "onboarding.md"), "")
+    lowered = line.lower()
+    state = "finished" if "finished" in lowered else "started" if lowered.startswith("onboarding") else "new"
+    return {
+        "available": store is not None,
+        "offered": bool(data.data["onboarding"].get("offered")),
+        "state": state,
+        "progress": line,
+        "done": state == "finished",
+    }

@@ -130,3 +130,20 @@ class SupportView(HomeAssistantView):
             return self.json_message("Support mode is off for this house.", 409)
         data.support.log(f"Console's operator {event} this house.")
         return self.json({"ok": True, "on": data.support.on(), "until": data.data["support"].get("until")})
+
+
+class TokenView(HomeAssistantView):
+    """Whether a Home Assistant grant is this house's own. The relay asks with a grant's id (the `iss`
+    of an access token, which isn't a secret) to find which house a Claude connector's request belongs
+    to. It never sends a token here, and this never returns one."""
+
+    url = "/api/console/relay/token"
+    name = "api:console:relay:token"
+
+    async def get(self, request: web.Request) -> web.Response:
+        if not _admin(request):
+            return self.json_message("Administrators only.", 403)
+        hass: HomeAssistant = request.app["hass"]
+        iss = request.query.get("iss", "")
+        known = bool(iss) and hass.auth.async_get_refresh_token(iss) is not None
+        return self.json({"known": known})

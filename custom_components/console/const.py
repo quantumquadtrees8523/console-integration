@@ -2,7 +2,7 @@
 
 DOMAIN = "console"
 NAME = "Console"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 AGENT_NAME = "Console"
 
@@ -13,7 +13,8 @@ MODEL_PRO = "deepseek/deepseek-v4-pro-0813"
 EFFORT_FAST = "none"  # plain device commands: thinking off
 EFFORT_FULL = "low"  # everything else: a little thinking
 MODEL_TIMEOUT_S = 25
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 8  # for a plain command
+MAX_TOOL_ROUNDS_FULL = 24  # for everything else: a skill like welcome reads memory, the house and other skills
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 

@@ -44,7 +44,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         www = Path(__file__).parent / "www"
         await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(www), False)])
         frontend.add_extra_js_url(hass, CARD_URL)
-        for view in (relay_api.ConfigView, relay_api.StatusView, relay_api.NotifyView, relay_api.SupportView):
+        for view in (
+            relay_api.ConfigView,
+            relay_api.StatusView,
+            relay_api.NotifyView,
+            relay_api.SupportView,
+            relay_api.TokenView,
+        ):
             hass.http.register_view(view())
         websocket_api.async_setup(hass)
 

@@ -32,6 +32,7 @@ from .const import (
     LLM_API_ASSIST,
     LLM_API_SUNRISE,
     MAX_TOOL_ROUNDS,
+    MAX_TOOL_ROUNDS_FULL,
     MODEL_FLASH,
     MODEL_PRO,
     ROUTE_FALLBACK,
@@ -47,6 +48,10 @@ PROMPT = """You are Console, this home's assistant, answering inside Home Assist
 one or two short sentences unless the person asks for more. Do the thing with your tools, then say what
 actually happened. Never say something worked unless a tool result shows it. If you can't do something,
 say so and say what the person can do instead.
+When the person wants to be shown around, to get started or to set the house up, call get_skill for
+the skill named welcome and follow it exactly: its stages, its questions and its own wording replace the
+brevity rule above, and you ask one thing at a time and wait for the answer. The same goes for any skill
+you follow.
 End your final reply with one label in double square brackets saying what kind of request this was:
 [[control]] (switching or setting a device), [[status]] (a question about the house), [[customization]]
 (changing dashboards, routines, names, memory), [[setup]] (adding devices or first-time setup),
@@ -335,7 +340,7 @@ class ConsoleAgent(conversation.ConversationEntity):
             tools = [_tool_schema(tool, serializer) for tool in chat_log.llm_api.tools]
         if escalate:
             tools.append(ESCALATE_TOOL)
-        for _ in range(MAX_TOOL_ROUNDS):
+        for _ in range(MAX_TOOL_ROUNDS if turn.route == ROUTE_FAST else MAX_TOOL_ROUNDS_FULL):
             messages = [m for content in chat_log.content if (m := _to_message(content))]
             done = await openrouter.complete(session, inference, model, messages, tools, effort)
             turn.model_calls += 1

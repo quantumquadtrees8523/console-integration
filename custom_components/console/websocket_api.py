@@ -21,6 +21,7 @@ from .status import status
 def async_setup(hass: HomeAssistant) -> None:
     for command in (
         ws_status,
+        ws_onboarding_offered,
         ws_knows,
         ws_memory_read,
         ws_memory_write,
@@ -36,9 +37,22 @@ def async_setup(hass: HomeAssistant) -> None:
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/status"})
+@websocket_api.async_response
+async def ws_status(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    data = hass.data[DOMAIN]
+    answer = status(hass, data) | {"is_admin": connection.user.is_admin}
+    answer["onboarding"] = await knows.onboarding(hass, data)
+    connection.send_result(msg["id"], answer)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/onboarding/offered"})
 @callback
-def ws_status(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    connection.send_result(msg["id"], status(hass, hass.data[DOMAIN]) | {"is_admin": connection.user.is_admin})
+def ws_onboarding_offered(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The chat card has offered the welcome once: it won't open with the offer again."""
+    data = hass.data[DOMAIN]
+    data.data["onboarding"]["offered"] = True
+    data.changed()
+    connection.send_result(msg["id"], {"ok": True})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/knows"})
