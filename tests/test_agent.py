@@ -44,13 +44,13 @@ async def test_the_model_gets_the_exposed_things_only_with_sunrise(hass, console
     model.say("Hello. [[other]]")
     await ask(hass, "tell me something nice about this house")
     names = [tool["function"]["name"] for tool in model.calls[0]["tools"]]
-    assert "intent__HassTurnOn" in names and "console_escalate" in names
+    assert "assist__intent__HassTurnOn" in names and "console__dashboard" in names and "console_escalate" in names
     assert model.calls[0]["messages"][0]["role"] == "system"
 
 
 async def test_a_tool_call_is_run_and_its_result_goes_back_to_the_model(hass, console, model, lights_off):
     link(console)
-    model.call_tool("intent__HassTurnOff", {"name": "Kitchen light"})
+    model.call_tool("assist__intent__HassTurnOff", {"name": "Kitchen light"})
     model.say("The kitchen light is off. [[control]]")
     reply = await ask(hass, "could you make the kitchen dark for the movie")
     assert reply == "The kitchen light is off."

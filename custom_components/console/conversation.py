@@ -24,7 +24,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.json import json_dumps
 
-from . import openrouter, router, wording
+from . import openrouter, router, tools, wording
 from .const import (
     AGENT_NAME,
     DOMAIN,
@@ -150,10 +150,15 @@ def devices_block(hass: HomeAssistant) -> str:
     return DEVICES_HEADER + "\n".join(sorted(lines)[:250]) if lines else ""
 
 
+def _bare(tool_name: str) -> str:
+    """A tool's own name, without the prefix Home Assistant adds when several APIs are merged."""
+    return tool_name.rsplit("__", 1)[-1]
+
+
 def confirmed_reply(calls: list[llm.ToolInput], results: list[conversation.ToolResultContent]) -> str | None:
     """A plain command that every device confirmed gets its reply from the read-back, with no second
     model call. None when anything wasn't a confirmed `act`."""
-    if not calls or len(results) != len(calls) or any(call.tool_name != "act" for call in calls):
+    if not calls or len(results) != len(calls) or any(_bare(call.tool_name) != "act" for call in calls):
         return None
     rows = []
     for result in results:
@@ -213,7 +218,7 @@ class ConsoleAgent(conversation.ConversationEntity):
         try:
             await chat_log.async_provide_llm_data(
                 user_input.as_llm_context(DOMAIN),
-                LLM_API_SUNRISE if sunrise else LLM_API_ASSIST,
+                [LLM_API_SUNRISE if sunrise else LLM_API_ASSIST, tools.API_ID],
                 PROMPT,
                 user_input.extra_system_prompt,
             )

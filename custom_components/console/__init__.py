@@ -14,8 +14,9 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall
+from homeassistant.helpers import llm
 
-from . import dashboard, relay_api, websocket_api
+from . import dashboard, relay_api, tools, websocket_api
 from .const import DOMAIN, PANEL_URL, STATIC_URL, VERSION
 from .guard import AiGuard
 from .learned import Learned
@@ -59,6 +60,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={},
         )
 
+    entry.async_on_unload(llm.async_register_api(hass, tools.ConsoleAPI(hass)))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     data.learned.start()
     data.others.start()

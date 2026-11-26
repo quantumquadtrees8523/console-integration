@@ -58,6 +58,7 @@ def _fresh() -> dict[str, Any]:
         "support": {"on": False, "until": None, "log": []},
         "onboarding": {"offered": False, "done": False},
         "dashboard": {},
+        "made": {},  # dashboards made through the agent's `dashboard` tool, by url path
         "linked_at": None,
         "switches": {"cloud": True, "ai": True},  # the kill switches: both on unless the household turns one off
         "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
