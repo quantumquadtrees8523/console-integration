@@ -82,6 +82,7 @@ class Escalate(Exception):
 @dataclass
 class Turn:
     route: str
+    text: str = ""
     cost_usd: float = 0.0
     calls: list[tuple[str, dict]] = field(default_factory=list)
     label: str | None = None
@@ -218,8 +219,9 @@ class ConsoleAgent(conversation.ConversationEntity):
             chat_log.content[0] = conversation.SystemContent(content=system.content + devices_block(self.hass))
 
         route, effort = router.first_route(user_input.text)
-        turn = Turn(route=route)
+        turn = Turn(route=route, text=user_input.text)
         keep = len(chat_log.content)
+        began = time.time()
         try:
             try:
                 await self._run(chat_log, inference, MODEL_FLASH, effort, turn, escalate=route != ROUTE_FAST)
@@ -240,6 +242,8 @@ class ConsoleAgent(conversation.ConversationEntity):
             _LOGGER.warning("Console: the cloud agent failed (%s)", why)
             del chat_log.content[keep:]
             return self._say(user_input, chat_log, wording.MODEL_FAILED_REPLY, turn.route, "other", False)
+        finally:
+            self.data.others.mark_own(began, time.time())
 
         category = turn.label or router.category_for_tools(turn.calls)
         self.data.count_turn(turn.route, category, True)
@@ -355,6 +359,9 @@ class ConsoleAgent(conversation.ConversationEntity):
             ]
             if turn.route == ROUTE_FAST and (reply := confirmed_reply(calls, results)):
                 turn.label = "control"
+                rows = [row for result in results for row in result.result.data["results"]]
+                if self.data.learned.observe(turn.text, calls, rows):
+                    reply += " " + wording.LEARNED
                 chat_log.async_add_assistant_content_without_tools(
                     conversation.AssistantContent(agent_id=self.entity_id, content=reply)
                 )

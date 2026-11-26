@@ -2,7 +2,7 @@
 
 DOMAIN = "console"
 NAME = "Console"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 AGENT_NAME = "Console"
 
@@ -23,7 +23,8 @@ ROUTE_FAST = "flash_fast"  # Flash, thinking off
 ROUTE_FULL = "flash"  # Flash, thinking low
 ROUTE_PRO = "pro"  # Pro, after a failure or a hard case
 ROUTE_FALLBACK = "fallback"  # the cloud agent couldn't be used; the person was told so
-ROUTES = (ROUTE_LOCAL, ROUTE_FAST, ROUTE_FULL, ROUTE_PRO, ROUTE_FALLBACK)
+ROUTE_OTHER = "other_agent"  # another agent (Claude, through the MCP server) did it with Sunrise's tools
+ROUTES = (ROUTE_LOCAL, ROUTE_FAST, ROUTE_FULL, ROUTE_PRO, ROUTE_FALLBACK, ROUTE_OTHER)
 
 # What each turn is counted as. Only these labels and their counts ever leave the box.
 CATEGORIES = ("control", "status", "customization", "setup", "troubleshooting", "other")
