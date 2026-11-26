@@ -12,6 +12,8 @@ const STYLE = `
   .banner.warn { background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent); }
   .banner.stop { background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent); }
   .banner.offline { background: color-mix(in srgb, var(--secondary-text-color, #888) 14%, transparent); }
+  .banner.off { background: color-mix(in srgb, var(--secondary-text-color, #888) 20%, transparent); }
+  .banner.support { background: color-mix(in srgb, var(--warning-color, #ffa600) 26%, transparent); }
   .banner a { color: var(--primary-color); white-space: nowrap; cursor: pointer; text-decoration: underline; }
   .log { flex: 1; overflow-y: auto; padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 10px; }
   .hello { color: var(--secondary-text-color); font-size: 14px; line-height: 20px; }
@@ -94,7 +96,8 @@ class ConsoleChatCard extends HTMLElement {
     el.className = `banner ${sensor.attributes.banner_kind || "warn"}`;
     el.textContent = text + " ";
     const link = document.createElement("a");
-    link.textContent = sensor.attributes.banner_kind === "offline" ? "Details" : "Need more?";
+    const kind = sensor.attributes.banner_kind;
+    link.textContent = kind === "offline" ? "Details" : kind === "support" ? "Turn it off" : kind === "off" ? "Settings" : "Need more?";
     link.addEventListener("click", () => {
       history.pushState(null, "", "/console");
       window.dispatchEvent(new CustomEvent("location-changed"));

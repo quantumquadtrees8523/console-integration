@@ -58,7 +58,10 @@ def _fresh() -> dict[str, Any]:
         "support": {"on": False, "until": None, "log": []},
         "onboarding": {"offered": False, "done": False},
         "dashboard": {},
+        "made": {},  # dashboards made through the agent's `dashboard` tool, by url path
         "linked_at": None,
+        "switches": {"cloud": True, "ai": True},  # the kill switches: both on unless the household turns one off
+        "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
     }
 
 
@@ -92,8 +95,11 @@ class ConsoleData:
         return lambda: self._listeners.remove(listener)
 
     async def async_erase(self) -> None:
-        """Forget everything Console keeps (the wipe's first level)."""
+        """Forget everything Console keeps (the wipe's first level). The kill switches stay as they
+        were: erasing data must never turn AI back on."""
+        switches = dict(self.data.get("switches") or {})
         self.data = _fresh()
+        self.data["switches"].update(switches)
         await self._store.async_remove()
         for listener in list(self._listeners):
             listener()
@@ -150,9 +156,23 @@ class ConsoleData:
             return None
         return inference
 
+    def switch(self, key: str) -> bool:
+        return bool((self.data.get("switches") or {}).get(key, True))
+
+    @callback
+    def set_switch(self, key: str, on: bool) -> None:
+        self.data.setdefault("switches", {"cloud": True, "ai": True})[key] = bool(on)
+        self.changed()
+
     def cloud_state(self) -> str:
-        """ok, near_limit, over_limit or not_linked (no usable key: never linked, or the relay has been
-        out of reach for longer than a key lasts)."""
+        """ai_off or cloud_off (a kill switch is off), ok, near_limit, over_limit, or not_linked (no
+        usable key: never linked, or the relay has been out of reach for longer than a key lasts)."""
+        if not self.switch("ai"):
+            return "ai_off"
+        if not self.switch("cloud"):
+            return "cloud_off"
+        if self.data.get("unlinked"):
+            return "not_linked"
         if self.used >= STOP_AT:
             return "over_limit"
         if self.key() is None:

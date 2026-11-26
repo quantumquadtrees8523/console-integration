@@ -12,7 +12,7 @@ import probatio as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import dashboard, knows
+from . import dashboard, knows, wipe
 from .const import DOMAIN
 from .status import status
 
@@ -28,6 +28,9 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_learned_forget,
         ws_assist_clear,
         ws_dashboard_rebuild,
+        ws_support_set,
+        ws_wipe,
+        ws_relink,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -102,3 +105,44 @@ async def ws_dashboard_rebuild(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     connection.send_result(msg["id"], await dashboard.ensure(hass, hass.data[DOMAIN], force=True))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/support/set", vol.Required("on"): bool})
+@websocket_api.require_admin
+@callback
+def ws_support_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    who = connection.user.name or "an administrator"
+    connection.send_result(msg["id"], hass.data[DOMAIN].support.set(msg["on"], who))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "console/wipe",
+        vol.Required("level"): vol.In(["data", "factory"]),
+        vol.Required("confirm"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_wipe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Erase Console and Sunrise data, or factory reset Home Assistant. The words must be typed."""
+    try:
+        if msg["level"] == "data":
+            done = await wipe.erase_data(hass, msg["confirm"])
+        else:
+            done = await wipe.factory_reset(hass, msg["confirm"])
+    except wipe.Refused as error:
+        connection.send_error(msg["id"], "not_confirmed", str(error))
+        return
+    connection.send_result(msg["id"], done)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/relink"})
+@websocket_api.require_admin
+@callback
+def ws_relink(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Let the relay hand this house a key again after its data was erased."""
+    data = hass.data[DOMAIN]
+    data.data["unlinked"] = False
+    data.changed()
+    connection.send_result(msg["id"], {"ok": True})

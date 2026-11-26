@@ -1,6 +1,6 @@
 """Console's Home dashboard: built from the house itself, the same way every time.
 
-One view of sections: the chat card, then lights (on/off first, room by room), then speakers, then
+One view of sections: the chat card with Console's two off switches under it, then lights (on/off first, room by room), then speakers, then
 everything else the owner exposed to Assist. Nothing is guessed and no model is involved: the same
 house gives the same dashboard. A dashboard the household has edited by hand is left alone unless they
 ask for it to be rebuilt.
@@ -22,6 +22,7 @@ TITLE = "Home"
 ICON = "mdi:home-heart"
 _LOGGER = logging.getLogger(__name__)
 
+OWN = ("switch.console_cloud_agent", "switch.console_ai")
 # (section title, icon, domains), in the order they appear after the chat card.
 GROUPS = (
     ("Lights", "mdi:lightbulb-group", ("light",)),
@@ -62,33 +63,119 @@ def _tile(entity_id: str, domain: str) -> dict[str, Any]:
     return tile
 
 
+def _group_sections(hass: HomeAssistant, entity_ids: list[str], by_room: bool) -> list[dict[str, Any]]:
+    """Sections of tiles for these things: lights first, then speakers, climate and the rest."""
+    sections = []
+    for title, icon, domains in GROUPS:
+        found = [
+            (_area_name(hass, eid) or "~", (hass.states.get(eid).name if hass.states.get(eid) else eid).lower(), eid)
+            for eid in entity_ids
+            if eid.partition(".")[0] in domains
+        ]
+        if not found:
+            continue
+        cards: list[dict[str, Any]] = [{"type": "heading", "heading": title, "heading_style": "title", "icon": icon}]
+        room = None
+        for area, _, entity_id in sorted(found):
+            if by_room and area != room and len({a for a, _, _ in found}) > 1:
+                room = area
+                cards.append({"type": "heading", "heading": "No room yet" if area == "~" else area, "heading_style": "subtitle"})
+            cards.append(_tile(entity_id, entity_id.partition(".")[0]))
+        sections.append({"type": "grid", "cards": cards})
+    return sections
+
+
+def _exposed_things(hass: HomeAssistant) -> list[str]:
+    domains = tuple(d for _, _, group in GROUPS for d in group)
+    return [s.entity_id for s in hass.states.async_all(domains) if s.entity_id not in OWN and _exposed(hass, s.entity_id)]
+
+
 def build(hass: HomeAssistant) -> dict[str, Any]:
-    """The dashboard's config for this house right now."""
+    """The Home dashboard's config for this house right now."""
     sections: list[dict[str, Any]] = [
         {
             "type": "grid",
             "cards": [
                 {"type": "heading", "heading": "Console", "heading_style": "title", "icon": ICON},
                 {"type": "custom:console-chat-card", "title": "", "grid_options": {"columns": "full", "rows": 7}},
+                {"type": "tile", "entity": "switch.console_cloud_agent", "name": "Cloud agent"},
+                {"type": "tile", "entity": "switch.console_ai", "name": "AI in this house"},
             ],
         }
     ]
-    for title, icon, domains in GROUPS:
-        found = []
-        for state in hass.states.async_all(domains):
-            if _exposed(hass, state.entity_id):
-                found.append((_area_name(hass, state.entity_id) or "~", state.name.lower(), state.entity_id))
-        if not found:
-            continue
-        cards: list[dict[str, Any]] = [{"type": "heading", "heading": title, "heading_style": "title", "icon": icon}]
-        room = None
-        for area, _, entity_id in sorted(found):
-            if area != room and len({a for a, _, _ in found}) > 1:
-                room = area
-                cards.append({"type": "heading", "heading": "No room yet" if area == "~" else area, "heading_style": "subtitle"})
-            cards.append(_tile(entity_id, entity_id.partition(".")[0]))
-        sections.append({"type": "grid", "cards": cards})
+    sections += _group_sections(hass, _exposed_things(hass), by_room=True)
     return {"views": [{"type": "sections", "title": TITLE, "path": "home", "icon": ICON, "max_columns": 3, "sections": sections}]}
+
+
+class Refused(ValueError):
+    """Not a dashboard that can be made or removed; the words are for the person."""
+
+
+def _slug(title: str) -> str:
+    from homeassistant.util import slugify  # noqa: PLC0415
+
+    return "console-" + slugify(title).replace("_", "-")
+
+
+def made(data) -> list[dict[str, Any]]:
+    """The dashboards made through the `dashboard` tool."""
+    return [{"title": d["title"], "url": f"/{path}", "rooms": d.get("rooms", [])} for path, d in (data.data.get("made") or {}).items()]
+
+
+async def make(hass: HomeAssistant, data, title: str, rooms: list[str], entity_ids: list[str]) -> dict[str, Any]:
+    """A dashboard for these rooms and things. Making one with a title that exists rebuilds it."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    title = title.strip()
+    if not title or len(title) > 40:
+        raise Refused("Give the dashboard a name of up to 40 characters.")
+    path = _slug(title)
+    if path == URL_PATH:
+        raise Refused("That name is taken by the Home dashboard. Pick another.")
+    wanted = {r.strip().lower() for r in rooms if r.strip()}
+    known = {a.name.lower(): a.name for a in ar.async_get(hass).async_list_areas()}
+    if missing := sorted(wanted - set(known)):
+        raise Refused(f"There's no room called {', '.join(missing)}. The rooms are: {', '.join(sorted(known.values())) or 'none yet'}.")
+    things = [eid for eid in _exposed_things(hass) if _area_name(hass, eid).lower() in wanted]
+    unknown = [eid for eid in entity_ids if hass.states.get(eid) is None]
+    if unknown:
+        raise Refused(f"These aren't things in this house: {', '.join(unknown)}.")
+    hidden = [eid for eid in entity_ids if not _exposed(hass, eid)]
+    things += [eid for eid in entity_ids if eid not in things and eid not in hidden]
+    if not things:
+        raise Refused("Nothing in those rooms is exposed to Assist, so the dashboard would be empty. Nothing was made.")
+    lovelace = hass.data[LOVELACE_DATA]
+    records = data.data.setdefault("made", {})
+    if path not in lovelace.dashboards:
+        await _collection(hass).async_create_item(
+            {"url_path": path, "title": title, "icon": "mdi:view-dashboard", "show_in_sidebar": True, "require_admin": False, "mode": "storage"}
+        )
+    elif path not in records:
+        raise Refused("There's already a dashboard with that name that Console didn't make. Pick another name.")
+    config = {"views": [{"type": "sections", "title": title, "path": "home", "max_columns": 3, "sections": _group_sections(hass, things, by_room=len(wanted) != 1)}]}
+    await lovelace.dashboards[path].async_save(config)
+    records[path] = {"title": title, "rooms": sorted(known[w] for w in wanted), "entity_ids": [e for e in entity_ids if e not in hidden]}
+    data.changed()
+    result: dict[str, Any] = {"ok": True, "title": title, "url": f"/{path}", "things": len(things), "where": "in the sidebar"}
+    if hidden:
+        result["left_out"] = {"ids": hidden, "why": "not exposed to Assist (Settings > Voice assistants > Expose)"}
+    return result
+
+
+async def unmake(hass: HomeAssistant, data, title: str) -> dict[str, Any]:
+    """Remove a dashboard that was made through the tool. Never one a person built themselves."""
+    path = _slug(title.strip())
+    records = data.data.get("made") or {}
+    if path not in records:
+        names = ", ".join(d["title"] for d in records.values()) or "none"
+        raise Refused(f"Console didn't make a dashboard called {title}. The ones it made: {names}.")
+    collection = _collection(hass)
+    for item in list(collection.async_items()):
+        if item.get("url_path") == path:
+            await collection.async_delete_item(item["id"])
+    del records[path]
+    data.changed()
+    return {"ok": True, "removed": title}
 
 
 def digest(config: dict[str, Any]) -> str:

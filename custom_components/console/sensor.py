@@ -51,4 +51,5 @@ class CloudAgentSensor(SensorEntity):
             "tier": plan.get("tier_name"),
             "banner": shown["text"] if shown else None,
             "banner_kind": shown["kind"] if shown else None,
+            "support": self.data.support.on(),
         }

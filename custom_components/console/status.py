@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -14,6 +15,15 @@ from .state import ConsoleData, next_reset
 def banner(data: ConsoleData) -> dict[str, Any] | None:
     """The banner over the chat card, or None when there's nothing to say."""
     state = data.cloud_state()
+    support = getattr(data, "support", None)
+    if support is not None and support.on():
+        return {"kind": "support", "text": wording.support_on(datetime.fromisoformat(support.state["until"]))}
+    if state == "ai_off":
+        return {"kind": "off", "text": wording.AI_OFF}
+    if state == "cloud_off":
+        return {"kind": "off", "text": wording.CLOUD_OFF}
+    if data.data.get("unlinked"):
+        return {"kind": "offline", "text": wording.UNLINKED}
     if state == "near_limit":
         return {"kind": "warn", "text": wording.near_limit(min(99, int(data.used * 100)), data.plan)}
     if state == "over_limit":
@@ -36,7 +46,9 @@ def status(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "key_expires": (data.data.get("inference") or {}).get("expires_at"),
         "linked_at": data.data.get("linked_at"),
         "sunrise": bool(sunrise),
-        "support": {k: data.data["support"].get(k) for k in ("on", "until")},
+        "support": {"on": data.support.on(), "until": data.data["support"].get("until"), "log": list(data.data["support"].get("log") or [])[-30:]},
+        "unlinked": bool(data.data.get("unlinked")),
+        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai")},
         "onboarding": dict(data.data["onboarding"]),
         "learned": len(data.data["learned"]),
         "dashboard": {"url": f"/{dashboard.URL_PATH}", "written": bool((data.data.get("dashboard") or {}).get("written"))},

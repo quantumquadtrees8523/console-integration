@@ -37,7 +37,9 @@ def _report(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "sunrise": str(sunrise.version) if sunrise and sunrise.version else None,
         "cloud_agent": data.cloud_state(),
         "usage": data.summary(),
-        "support": {"on": bool(data.data["support"].get("on")), "until": data.data["support"].get("until")},
+        "support": {"on": data.support.on(), "until": data.data["support"].get("until")},
+        "unlinked": bool(data.data.get("unlinked")),
+        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai")},
     }
 
 
@@ -61,6 +63,8 @@ class ConfigView(HomeAssistantView):
         ):
             return self.json_message("inference needs key and base_url.", 400)
         data: ConsoleData = hass.data[DOMAIN]
+        if data.data.get("unlinked"):
+            return self.json_message("This house erased its link to Console. Someone here has to connect it again.", 409)
         data.apply_relay_config(body)
         await data.async_save_now()
         return self.json(_report(hass, data))
@@ -99,3 +103,30 @@ class NotifyView(HomeAssistantView):
                 await hass.services.async_call("notify", service, {"title": title, "message": message})
                 pushed += 1
         return self.json({"ok": True, "phones": pushed})
+
+
+class SupportView(HomeAssistantView):
+    """Support mode, from the relay: a household member turning it on or off at Console's site
+    (`set`), or the operator opening or closing the house (`event`), which is refused unless it's on."""
+
+    url = "/api/console/relay/support"
+    name = "api:console:relay:support"
+
+    async def post(self, request: web.Request) -> web.Response:
+        if not _admin(request):
+            return self.json_message("Administrators only.", 403)
+        hass: HomeAssistant = request.app["hass"]
+        data: ConsoleData = hass.data[DOMAIN]
+        try:
+            body = await request.json()
+        except ValueError:
+            return self.json_message("That wasn't JSON.", 400)
+        if "set" in body:
+            return self.json(data.support.set(bool(body["set"]), "someone in the household, at Console's site"))
+        event = body.get("event")
+        if event not in ("opened", "closed"):
+            return self.json_message("Send set or event.", 400)
+        if event == "opened" and not data.support.on():
+            return self.json_message("Support mode is off for this house.", 409)
+        data.support.log(f"Console's operator {event} this house.")
+        return self.json({"ok": True, "on": data.support.on(), "until": data.data["support"].get("until")})

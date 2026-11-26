@@ -29,6 +29,7 @@ async def test_the_home_dashboard_is_built_from_the_house_and_made_the_default(h
     config = await hass.data[LOVELACE_DATA].dashboards["console-home"].async_load(False)
     sections = config["views"][0]["sections"]
     assert sections[0]["cards"][1]["type"] == "custom:console-chat-card"
+    assert [c["entity"] for c in sections[0]["cards"][2:]] == ["switch.console_cloud_agent", "switch.console_ai"]
     assert [s["cards"][0]["heading"] for s in sections] == ["Console", "Lights", "Music and speakers"]
     tiles = [c["entity"] for s in sections for c in s["cards"] if c["type"] == "tile"]
     assert "light.desk" in tiles and "light.kitchen" in tiles and "light.hidden" not in tiles
@@ -84,7 +85,7 @@ async def test_a_sentence_said_three_times_is_learned_and_then_runs_at_home(hass
     off = async_mock_service(hass, "light", "turn_off")
     said = "Make the kitchen go dark, please!"
     for time_said in range(1, LEARN_AFTER + 1):
-        model.call_tool("act", {"action": "light.turn_off", "entity_ids": ["light.kitchen"]}, f"call_{time_said}")
+        model.call_tool("sunrise__act", {"action": "light.turn_off", "entity_ids": ["light.kitchen"]}, f"call_{time_said}")
         reply = await ask(hass, said)
         assert reply.startswith("Done. Kitchen light is off.")
         assert (wording.LEARNED in reply) == (time_said == LEARN_AFTER)
@@ -100,7 +101,7 @@ async def test_a_sentence_said_three_times_is_learned_and_then_runs_at_home(hass
     assert console.summary()["by_route"]["local"] == 1 and learned[0]["uses"] == 1
 
     assert console.learned.forget(learned[0]["id"]) is True
-    model.call_tool("act", {"action": "light.turn_off", "entity_ids": ["light.kitchen"]}, "call_9")
+    model.call_tool("sunrise__act", {"action": "light.turn_off", "entity_ids": ["light.kitchen"]}, "call_9")
     await ask(hass, said)
     assert len(model.calls) == LEARN_AFTER + 1  # forgotten: back to the cloud agent
 
@@ -109,7 +110,7 @@ async def test_only_a_hash_is_kept_until_a_sentence_is_learned(hass, console, mo
     link(console)
     llm.async_register_api(hass, _Sunrise(hass))
     async_mock_service(hass, "light", "turn_off")
-    model.call_tool("act", {"action": "light.turn_off", "entity_ids": ["light.kitchen"]})
+    model.call_tool("sunrise__act", {"action": "light.turn_off", "entity_ids": ["light.kitchen"]})
     await ask(hass, "Make the kitchen go dark, please!")
     import json
 

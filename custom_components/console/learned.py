@@ -82,7 +82,7 @@ class Learned:
     def observe(self, text: str, calls: list, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         """A plain command the cloud agent just did and confirmed. Counts it; returns the new learned
         sentence when this was the time that tipped it."""
-        if len(calls) != 1 or calls[0].tool_name != "act":
+        if len(calls) != 1 or calls[0].tool_name.rsplit("__", 1)[-1] != "act":
             return None
         args = calls[0].tool_args or {}
         action, entity_ids, extra = str(args.get("action") or ""), list(args.get("entity_ids") or []), dict(args.get("data") or {})

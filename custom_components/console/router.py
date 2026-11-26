@@ -56,6 +56,7 @@ def category_for_intent(intent_name: str | None) -> str:
 _TOOL_CATEGORY = {
     "act": "control",
     "routine": "customization",
+    "dashboard": "customization",
     "registry_edit": "customization",
     "skill_update": "customization",
     "memory_write": "customization",

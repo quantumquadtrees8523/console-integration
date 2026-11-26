@@ -2,7 +2,7 @@
 
 DOMAIN = "console"
 NAME = "Console"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 AGENT_NAME = "Console"
 
