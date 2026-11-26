@@ -1,0 +1,28 @@
+name: release
+
+# A tag vX.Y.Z is a release: tested, checked against the manifest's version, and published as a GitHub
+# release, which is what HACS installs.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches the manifest and const.py
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "\"version\": \"$v\"" custom_components/console/manifest.json
+          grep -q "^VERSION = \"$v\"$" custom_components/console/const.py
+      - name: Write the GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes

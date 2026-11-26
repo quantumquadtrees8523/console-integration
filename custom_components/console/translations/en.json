@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Console",
+        "description": "Console adds its agent, a chat card and a Console page in the sidebar. There's nothing to type here: once this house is linked at Console's site, the rest arrives by itself."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Console is already set up."
+    }
+  }
+}

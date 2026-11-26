@@ -1,0 +1,54 @@
+"""Names and settings in one place."""
+
+DOMAIN = "console"
+NAME = "Console"
+VERSION = "0.1.0"
+
+AGENT_NAME = "Console"
+
+# The router's models (OpenRouter ids). Flash answers everything it can; Pro only after Flash fails or
+# hands a hard case up.
+MODEL_FLASH = "deepseek/deepseek-v4.1-flash"
+MODEL_PRO = "deepseek/deepseek-v4-pro-0813"
+EFFORT_FAST = "none"  # plain device commands: thinking off
+EFFORT_FULL = "low"  # everything else: a little thinking
+MODEL_TIMEOUT_S = 25
+MAX_TOOL_ROUNDS = 8
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+
+# The routes a turn can take, in the order the router tries them.
+ROUTE_LOCAL = "local"  # Home Assistant's own agent: no model, no internet
+ROUTE_FAST = "flash_fast"  # Flash, thinking off
+ROUTE_FULL = "flash"  # Flash, thinking low
+ROUTE_PRO = "pro"  # Pro, after a failure or a hard case
+ROUTE_FALLBACK = "fallback"  # the cloud agent couldn't be used; the person was told so
+ROUTES = (ROUTE_LOCAL, ROUTE_FAST, ROUTE_FULL, ROUTE_PRO, ROUTE_FALLBACK)
+
+# What each turn is counted as. Only these labels and their counts ever leave the box.
+CATEGORIES = ("control", "status", "customization", "setup", "troubleshooting", "other")
+
+# The allowance: the share of the month's cap at which the banner shows, and at which the cloud agent stops.
+WARN_AT = 0.8
+STOP_AT = 1.0
+
+# What the house is on until the relay says otherwise.
+DEFAULT_PLAN = {
+    "tier": "free",
+    "tier_name": "Free",
+    "cap_usd": 1.0,
+    "next": {"name": "Standard", "price": "$6.50 a month"},
+    "contact": "Surya",
+}
+
+STORAGE_KEY = DOMAIN
+STORAGE_VERSION = 1
+MONTHS_KEPT = 12
+
+STATIC_URL = "/console_static"
+PANEL_URL = "console"
+
+LLM_API_SUNRISE = "sunrise"
+LLM_API_ASSIST = "assist"
+
+SUPPORT_DAYS = 7
