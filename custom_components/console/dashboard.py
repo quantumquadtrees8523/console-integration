@@ -1,6 +1,6 @@
 """Console's Home dashboard: built from the house itself, the same way every time.
 
-One view of sections: the chat card, then lights (on/off first, room by room), then speakers, then
+One view of sections: the chat card with Console's two off switches under it, then lights (on/off first, room by room), then speakers, then
 everything else the owner exposed to Assist. Nothing is guessed and no model is involved: the same
 house gives the same dashboard. A dashboard the household has edited by hand is left alone unless they
 ask for it to be rebuilt.
@@ -22,6 +22,7 @@ TITLE = "Home"
 ICON = "mdi:home-heart"
 _LOGGER = logging.getLogger(__name__)
 
+OWN = ("switch.console_cloud_agent", "switch.console_ai")
 # (section title, icon, domains), in the order they appear after the chat card.
 GROUPS = (
     ("Lights", "mdi:lightbulb-group", ("light",)),
@@ -70,12 +71,16 @@ def build(hass: HomeAssistant) -> dict[str, Any]:
             "cards": [
                 {"type": "heading", "heading": "Console", "heading_style": "title", "icon": ICON},
                 {"type": "custom:console-chat-card", "title": "", "grid_options": {"columns": "full", "rows": 7}},
+                {"type": "tile", "entity": "switch.console_cloud_agent", "name": "Cloud agent"},
+                {"type": "tile", "entity": "switch.console_ai", "name": "AI in this house"},
             ],
         }
     ]
     for title, icon, domains in GROUPS:
         found = []
         for state in hass.states.async_all(domains):
+            if state.entity_id in OWN:
+                continue  # Console's own switches sit under the chat card
             if _exposed(hass, state.entity_id):
                 found.append((_area_name(hass, state.entity_id) or "~", state.name.lower(), state.entity_id))
         if not found:

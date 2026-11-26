@@ -29,6 +29,7 @@ async def test_the_home_dashboard_is_built_from_the_house_and_made_the_default(h
     config = await hass.data[LOVELACE_DATA].dashboards["console-home"].async_load(False)
     sections = config["views"][0]["sections"]
     assert sections[0]["cards"][1]["type"] == "custom:console-chat-card"
+    assert [c["entity"] for c in sections[0]["cards"][2:]] == ["switch.console_cloud_agent", "switch.console_ai"]
     assert [s["cards"][0]["heading"] for s in sections] == ["Console", "Lights", "Music and speakers"]
     tiles = [c["entity"] for s in sections for c in s["cards"] if c["type"] == "tile"]
     assert "light.desk" in tiles and "light.kitchen" in tiles and "light.hidden" not in tiles

@@ -3,7 +3,7 @@
 const CATEGORY_NAMES = { control: "Controlling things", status: "Questions about the house", customization: "Customizing", setup: "Setting up", troubleshooting: "Fixing problems", other: "Other" };
 const ROUTE_NAMES = { local: "Answered at home (no cloud)", flash_fast: "Cloud agent, quick", flash: "Cloud agent", pro: "Cloud agent, stronger model", fallback: "Cloud agent unavailable", other_agent: "Another agent (Claude)" };
 const AGENT_NAMES = { console: "Console", other_agents: "Other agents (Claude)" };
-const STATE_NAMES = { ok: "Working", near_limit: "Working, allowance running low", over_limit: "Paused until next month", not_linked: "Not connected" };
+const STATE_NAMES = { ok: "Working", near_limit: "Working, allowance running low", over_limit: "Paused until next month", not_linked: "Not connected", cloud_off: "Turned off (Settings → Cloud agent)", ai_off: "Turned off (Settings → AI in this house)" };
 const TABS = [["plan", "Plan and usage"], ["knows", "What the house knows about you"], ["settings", "Settings"]];
 
 const STYLE = `
@@ -38,6 +38,8 @@ const STYLE = `
 
 const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "");
+const utcDay = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", timeZone: "UTC" }) : "");
+const stamp = (seconds) => (seconds ? new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
 const dayTime = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
 
 class ConsolePanel extends HTMLElement {
@@ -50,7 +52,7 @@ class ConsolePanel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     const sensor = hass.states["sensor.console_cloud_agent"];
-    const key = sensor ? sensor.state + sensor.attributes.percent_used + (sensor.attributes.support || "") : "";
+    const key = sensor ? sensor.state + sensor.attributes.percent_used + (sensor.attributes.support || "") + sensor.attributes.banner_kind : "";
     if (first || key !== this._key) { this._key = key; this._load(); }
   }
   set narrow(value) { this._narrow = value; }
@@ -81,7 +83,7 @@ class ConsolePanel extends HTMLElement {
         <h2>Your plan</h2>
         <p><b>${esc(plan.tier_name)}</b> · Console's cloud agent can use up to $${Number(plan.cap_usd).toFixed(2)} of AI a month.</p>
         <div class="bar ${kind}"><div style="width:${percent}%"></div></div>
-        <p class="soft">${s.percent}% used this month ($${Number(usage.spend_usd || 0).toFixed(2)} of $${Number(plan.cap_usd).toFixed(2)}). Starts again on ${day(s.resets)}.</p>
+        <p class="soft">${s.percent}% used this month ($${Number(usage.spend_usd || 0).toFixed(2)} of $${Number(plan.cap_usd).toFixed(2)}). Starts again on ${utcDay(s.resets)}.</p>
         <p class="soft">${more}</p>
       </section>
       <section>
@@ -113,7 +115,7 @@ class ConsolePanel extends HTMLElement {
         <p class="soft">${esc(this._said)}</p></section>`;
     }
     const memory = k.sunrise
-      ? (k.memory.length ? `<table>${k.memory.map((m) => `<tr><td><a href="#" data-do="mem-open" data-name="${esc(m.name)}">${esc(m.name)}</a><div class="soft">${esc(m.first_line || "")}</div></td><td class="soft">${esc(String(m.modified || m.changed || "").slice(0, 10))}</td></tr>`).join("")}</table>` : `<p class="soft">Nothing remembered yet.</p>`)
+      ? (k.memory.length ? `<table>${k.memory.map((m) => `<tr><td><a href="#" data-do="mem-open" data-name="${esc(m.name)}">${esc(m.name)}</a><div class="soft">${esc(m.first_line || "")}</div></td><td class="soft">${esc(stamp(m.changed))}</td></tr>`).join("")}</table>` : `<p class="soft">Nothing remembered yet.</p>`)
       : `<p class="soft">Sunrise isn't installed, so there are no notes.</p>`;
     const presence = k.presence.length ? `<table>${k.presence.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.state === "home" ? "Home" : p.state === "not_home" ? "Away" : p.state)} · since ${dayTime(p.since)}</td></tr>`).join("")}</table>` : `<p class="soft">Home Assistant isn't tracking anyone's presence.</p>`;
     const learned = k.learned.length ? `<table>${k.learned.map((l) => `<tr><td>“${esc(l.sentence)}”<div class="soft">${esc(l.names || "")} · learned ${day(l.learned_at)} · used ${l.uses || 0} times</div></td><td>${admin ? `<button class="act" data-do="forget" data-id="${esc(l.id)}">Forget</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="soft">None yet. When you ask for the same thing the same way three times, Console teaches it to Home Assistant so it runs at home.</p>`;
@@ -142,7 +144,33 @@ class ConsolePanel extends HTMLElement {
         <p class="soft">Console builds the Home dashboard from your house: the chat, then lights, speakers and the rest of what you've exposed to Assist. It keeps it up to date until you edit it by hand.</p>
         <div class="row"><a href="${esc((s.dashboard || {}).url || "/console-home")}">Open Home</a>${admin ? `<button class="act" data-do="rebuild">Rebuild it from the house</button>` : ""}</div>
         <p class="soft">${esc(this._said)}</p></section>
-      ${this._settingsExtra ? this._settingsExtra(s) : ""}`;
+      <section><h2>Off switches</h2>
+        <p><b>Console cloud agent: ${s.switches.cloud ? "on" : "off"}</b></p>
+        <p class="soft">Off: Console makes no calls to the cloud AI. Every request is answered at home by Home Assistant's own agent, so plain commands like “turn off the kitchen lights” work and anything else is declined. Claude is not affected by this switch.</p>
+        <div class="row"><button class="act" data-do="switch" data-entity="switch.console_cloud_agent" data-on="${s.switches.cloud ? "0" : "1"}">${s.switches.cloud ? "Turn the cloud agent off" : "Turn the cloud agent on"}</button></div>
+        <p style="margin-top:14px"><b>AI in this house: ${s.switches.ai ? "on" : "off"}</b></p>
+        <p class="soft">Off: no AI agent can read or change anything in this house. That means Console's cloud agent, Claude through the connector, and any other AI set up in Home Assistant. Plain commands still work, because Home Assistant's own agent matches sentences and isn't AI.</p>
+        <div class="row"><button class="act ${s.switches.ai ? "danger" : ""}" data-do="switch" data-entity="switch.console_ai" data-on="${s.switches.ai ? "0" : "1"}">${s.switches.ai ? "Turn all AI off" : "Turn AI back on"}</button></div>
+        <p class="soft">Both are also switches in Home Assistant (<code>switch.console_cloud_agent</code>, <code>switch.console_ai</code>), so you can put them on a dashboard.</p>
+      </section>
+      <section><h2>Support mode</h2>
+        <p class="soft">Off unless you turn it on. While it's on, Console's operator can open this house through Console's site and see what's in it, to help you. It turns itself off after 7 days, and everything the operator opens is listed here.</p>
+        <p><b>${s.support.on ? `On until ${dayTime(s.support.until)}` : "Off"}</b></p>
+        ${admin ? `<div class="row"><button class="act" data-do="support" data-on="${s.support.on ? "0" : "1"}">${s.support.on ? "Turn support mode off" : "Turn support mode on"}</button></div>` : ""}
+        ${(s.support.log || []).length ? `<table>${s.support.log.slice().reverse().map((l) => `<tr><td>${esc(l.what)}</td><td class="soft">${dayTime(l.at)}</td></tr>`).join("")}</table>` : `<p class="soft">Nothing has been done in support mode.</p>`}
+      </section>
+      ${s.unlinked ? `<section><h2>Connect this house to Console again</h2>
+        <p class="soft">This house's Console data was erased here, and it has been refusing Console's relay since. Connecting again lets the relay hand it a cloud-agent key the next time it checks in (within two hours, or sooner if Console's operator asks).</p>
+        ${admin ? `<div class="row"><button class="act" data-do="relink">Connect again</button></div>` : ""}</section>` : ""}
+      ${admin ? `<section><h2>Erase Console and Sunrise data</h2>
+        <p class="soft">Erases what Console and Sunrise keep on this box: the agents' notes (Sunrise's memory, its history and any skills you edited), learned sentences, this month's counts, the cloud-agent key and plan, and this house's link to Console's relay. Your devices, dashboards, automations and Home Assistant itself are not touched. To go ahead, type <b>erase my data</b>.</p>
+        <div class="row"><input type="text" id="wipe-data" placeholder="erase my data" autocomplete="off" style="max-width:220px"><button class="act danger" data-do="wipe" data-level="data">Erase Console and Sunrise data</button></div>
+      </section>
+      <section><h2>Factory reset Home Assistant</h2>
+        <p class="soft">Erases everything in Home Assistant on this box: every device, room, dashboard, automation, user and setting, and all of Console's and Sunrise's data. Home Assistant restarts as a new install and asks you to create an account. Only the installed add-on integrations (so Console and Sunrise can be set up again) and the backups folder are kept. <b>This can't be undone.</b> To go ahead, type <b>factory reset</b>.</p>
+        <div class="row"><input type="text" id="wipe-factory" placeholder="factory reset" autocomplete="off" style="max-width:220px"><button class="act danger" data-do="wipe" data-level="factory">Factory reset Home Assistant</button></div>
+      </section>` : `<section><p class="soft">Erasing data and factory reset are for Home Assistant administrators.</p></section>`}
+      <p class="soft">${esc(this._wipeSaid || "")}</p>`;
   }
 
   _draw() {
@@ -170,8 +198,16 @@ class ConsolePanel extends HTMLElement {
       else if (what === "forget") { await this._ws({ type: "console/learned/forget", sentence_id: at.id }); this._said = "Forgotten. That sentence goes to the cloud agent again."; }
       else if (what === "assist-clear") { const r = await this._ws({ type: "console/assist/clear" }); this._said = `Cleared ${r.cleared}.`; }
       else if (what === "rebuild") { const r = await this._ws({ type: "console/dashboard/rebuild" }); this._said = r.ok ? `Home dashboard: ${r.did}.` : r.why; }
-      else if (this._doExtra) { await this._doExtra(what, at); }
-    } catch (error) { this._said = String(error.message || error); }
+      else if (what === "switch") { await this._hass.callService("switch", at.on === "1" ? "turn_on" : "turn_off", { entity_id: at.entity }); await new Promise((done) => setTimeout(done, 300)); }
+      else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
+      else if (what === "relink") { await this._ws({ type: "console/relink" }); this._wipeSaid = "Connected again. The cloud agent comes back when the relay next checks in."; }
+      else if (what === "wipe") {
+        const typed = this.shadowRoot.getElementById(`wipe-${at.level}`).value;
+        const r = await this._ws({ type: "console/wipe", level: at.level, confirm: typed });
+        this._wipeSaid = at.level === "factory" ? "Home Assistant is restarting as a new install. This page will stop answering." : "Erased. Console and Sunrise have started again with nothing remembered, and this house is no longer connected to Console.";
+        if (r.restarting) return this._draw();
+      }
+    } catch (error) { if (what === "wipe" || what === "relink") this._wipeSaid = String(error.message || error); else this._said = String(error.message || error); }
     await this._load();
   }
 }

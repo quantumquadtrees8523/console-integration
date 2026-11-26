@@ -54,7 +54,8 @@ End your final reply with one label in double square brackets saying what kind o
 
 DEVICES_HEADER = (
     "\n\nThings you may switch right now (entity id | name | room | state). Use these ids with the act tool "
-    "directly; call house_map only when what the person means isn't here.\n"
+    "directly; call house_map only when what the person means isn't here. For a question about what is on, "
+    "off, playing or unreachable right now, answer from this list without calling a tool.\n"
 )
 ACTIONABLE = (
     "light", "switch", "fan", "media_player", "climate", "cover", "scene", "script", "vacuum", "humidifier",
@@ -197,6 +198,10 @@ class ConsoleAgent(conversation.ConversationEntity):
             return local
 
         state = self.data.cloud_state()
+        if state == "ai_off":
+            return self._say(user_input, chat_log, wording.AI_OFF_REPLY, ROUTE_FALLBACK, "other", False)
+        if state == "cloud_off":
+            return self._say(user_input, chat_log, wording.CLOUD_OFF_REPLY, ROUTE_FALLBACK, "other", False)
         if state == "over_limit":
             return self._say(user_input, chat_log, wording.OVER_LIMIT_REPLY, ROUTE_FALLBACK, "other", False)
         inference = self.data.key()

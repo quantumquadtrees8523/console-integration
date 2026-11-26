@@ -46,3 +46,40 @@ MODEL_FAILED_REPLY = (
 )
 
 LEARNED = "I've learned that one: from now on it runs at home, without the cloud."
+
+
+SUPPORT_TITLE = "Support mode is on"
+SUPPORT_EXPIRED = "Turned itself off after 7 days."
+
+
+def support_on(until: datetime) -> str:
+    day = f"{until.strftime('%B')} {until.day}"
+    return (
+        f"Support mode is on until {day}. Console's operator can open this house and see what's in it. "
+        "Turn it off any time on the Console page, under Settings."
+    )
+
+
+UNLINKED = (
+    "This house isn't connected to Console. Its data was erased here. Connect it again on the Console "
+    "page, under Settings."
+)
+
+
+CLOUD_OFF = (
+    "Console's cloud agent is turned off for this house. Plain commands still run at home. Turn it back on "
+    "on the Console page, under Settings."
+)
+AI_OFF = (
+    "AI is turned off for this house: Console's cloud agent, Claude and any other AI agent can't read or "
+    "change anything here. Plain commands still run at home. Turn it back on on the Console page, under Settings."
+)
+CLOUD_OFF_REPLY = (
+    "I couldn't do that one: Console's cloud agent is turned off for this house, so I can only do plain "
+    "commands like \u201cturn off the kitchen lights\u201d."
+)
+AI_OFF_REPLY = (
+    "I couldn't do that one: AI is turned off for this house, so I can only do plain commands like "
+    "\u201cturn off the kitchen lights\u201d."
+)
+AI_OFF_TOOLS = "AI is turned off for this house, on the Console page in Home Assistant. No AI agent can use its tools until someone there turns it back on."
