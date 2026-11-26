@@ -264,3 +264,14 @@ async def test_the_wording_of_the_off_replies_names_cloud_access(hass, console):
     assert "cloud access is turned off" in wording.CLOUD_OFF_REPLY
     assert "only be turned back on from inside the house" in wording.CLOUD_OFF
     assert llm  # the tools module is importable alongside
+
+
+async def test_the_card_is_not_in_the_pages_start_up_list(hass, console, hass_client):
+    """Loaded from there it can register before Home Assistant swaps its element registry, and be lost:
+    the 'Configuration error' the phone and tablet apps showed. It re-registers itself if dropped."""
+    from homeassistant.components import frontend
+
+    assert not [url for url in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls if "console-chat-card" in url]
+    client = await hass_client()
+    script = await (await client.get("/console_static/console-chat-card.js")).text()
+    assert "setTimeout(register" in script and "class extends ConsoleChatCard" in script

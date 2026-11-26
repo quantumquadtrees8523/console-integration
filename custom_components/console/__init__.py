@@ -46,7 +46,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[f"{DOMAIN}_served"] = True
         www = Path(__file__).parent / "www"
         await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(www), False)])
-        frontend.add_extra_js_url(hass, CARD_URL)
+        # The card is loaded as a dashboard resource, the way other custom cards are: Home Assistant loads
+        # those after its own start-up. Only where dashboards keep their resources in YAML (nothing to
+        # register it in) is it added to the page's start-up list instead.
+        if (await dashboard.ensure_resource(hass, CARD_URL)).startswith("dashboards here"):
+            frontend.add_extra_js_url(hass, CARD_URL)
         for view in (
             relay_api.ConfigView,
             relay_api.StatusView,

@@ -61,7 +61,7 @@ async def test_the_relay_can_notify_the_household(hass, console, hass_client):
 async def test_the_card_and_the_panel_are_served(hass, console, hass_client):
     client = await hass_client()
     card = await client.get("/console_static/console-chat-card.js")
-    assert card.status == 200 and 'customElements.define("console-chat-card"' in await card.text()
+    assert card.status == 200 and 'const NAME = "console-chat-card"' in await card.text()
     panel = await client.get("/console_static/console-panel.js")
     assert panel.status == 200 and "console-panel" in await panel.text()
     assert "console" in hass.data["frontend_panels"]
