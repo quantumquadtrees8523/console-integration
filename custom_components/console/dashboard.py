@@ -97,7 +97,7 @@ def build(hass: HomeAssistant) -> dict[str, Any]:
             "type": "grid",
             "cards": [
                 {"type": "heading", "heading": "Console", "heading_style": "title", "icon": ICON},
-                {"type": "custom:console-chat-card", "title": "", "grid_options": {"columns": "full", "rows": 7}},
+                {"type": "custom:console-chat-card", "title": "", "grid_options": {"columns": "full", "rows": 9}},
                 {"type": "tile", "entity": "switch.console_cloud_access", "name": "Cloud access"},
                 {"type": "tile", "entity": "switch.console_ai", "name": "AI in this house"},
             ],

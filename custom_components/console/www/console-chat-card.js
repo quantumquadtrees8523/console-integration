@@ -11,7 +11,8 @@ const RECENT_MS = 30 * 60 * 1000;
 
 const STYLE = `
   :host { display: block; height: 100%; }
-  ha-card { display: flex; flex-direction: column; height: 100%; min-height: var(--console-chat-height, 460px); overflow: hidden; }
+  [hidden] { display: none !important; }
+  ha-card { display: flex; flex-direction: column; height: 100%; min-height: var(--console-chat-height, 420px); overflow: hidden; }
   .banner { padding: 10px 16px; font-size: 14px; line-height: 20px; }
   .banner.warn { background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent); }
   .banner.stop { background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent); }
