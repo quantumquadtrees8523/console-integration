@@ -1,0 +1,11 @@
+{
+  "name": "console",
+  "version": "0.4.0",
+  "description": "Install Console on a Home Assistant box, connect Claude Code to the house through Console's relay, and manage support mode.",
+  "author": {
+    "name": "Console"
+  },
+  "homepage": "https://github.com/quantumquadtrees8523/console-integration",
+  "repository": "https://github.com/quantumquadtrees8523/console-integration",
+  "keywords": ["home-assistant", "console", "sunrise", "mcp"]
+}

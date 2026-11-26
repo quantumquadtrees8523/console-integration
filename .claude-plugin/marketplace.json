@@ -1,0 +1,16 @@
+{
+  "name": "console",
+  "owner": {
+    "name": "Console"
+  },
+  "metadata": {
+    "description": "Console for Home Assistant: the Claude Code side"
+  },
+  "plugins": [
+    {
+      "name": "console",
+      "source": "./claude-plugins/console",
+      "description": "Install Console on a Home Assistant box that already has Sunrise, connect Claude Code to the house through Console's relay, and turn support mode on or off. Needs the connect-to-box plugin from the Sunrise marketplace."
+    }
+  ]
+}

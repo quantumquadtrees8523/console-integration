@@ -44,6 +44,18 @@ longer than a key lasts, or the model fails) the person is told so, and step 1 k
   `customization`, `setup`, `troubleshooting`, `other`), by route, by agent, how many were done, and
   the spend. No messages, device names, rooms or times of day. The Console page shows the exact payload.
 
+## Claude Code plugin
+
+This repository is also a Claude Code plugin marketplace with one plugin, `console`:
+
+```bash
+claude plugin marketplace add quantumquadtrees8523/console-integration
+claude plugin install console@console
+```
+
+It adds three skills: `console:install` (put Console on a box that has Sunrise), `console:connect`
+(connect Claude to the house through Console's relay) and `console:support-mode`.
+
 ## Develop
 
 ```bash

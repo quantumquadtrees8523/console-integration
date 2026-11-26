@@ -114,15 +114,32 @@ class ConsoleChatCard extends HTMLElement {
       hello.className = "hello";
       hello.textContent = "Ask for anything in your home: “turn off the kitchen lights”, “what's on right now?”, “add a dashboard for the kids' room”.";
       log.appendChild(hello);
+      const welcome = this._welcome || {};
+      if (welcome.available && !welcome.offered && !welcome.done) {
+        // First run: Console speaks first, once.
+        const offer = document.createElement("div");
+        offer.className = "msg it";
+        offer.textContent = "Welcome. I'm Console, this home's agent. Want me to show you around? I'll learn your rooms and devices, add anything that's waiting, and set up one routine with you. It takes a few minutes and you can stop any time.";
+        log.appendChild(offer);
+      }
       const chips = document.createElement("div");
       chips.className = "chips";
       const offers = [];
-      if (this._welcome && !this._welcome.done) offers.push(["Show me around", "Show me around: start the welcome."]);
+      if (welcome.available && !welcome.done) {
+        offers.push([welcome.state === "started" ? "Pick up the welcome" : "Show me around", "Show me around."]);
+        if (!welcome.offered) offers.push(["Not now", null]);
+      }
       offers.push(["What's on right now?", "What's on right now?"]);
       for (const [label, text] of offers) {
         const chip = document.createElement("button");
         chip.className = "chip"; chip.type = "button"; chip.textContent = label;
-        chip.addEventListener("click", () => this._send(text));
+        chip.addEventListener("click", () => {
+          if (welcome.available && !welcome.offered) {
+            welcome.offered = true;
+            this._hass.callWS({ type: "console/onboarding/offered" }).catch(() => {});
+          }
+          if (text) this._send(text); else this._drawLog();
+        });
         chips.appendChild(chip);
       }
       log.appendChild(chips);
