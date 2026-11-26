@@ -164,9 +164,9 @@ class ConsolePanel extends HTMLElement {
         <p class="soft">Both are also switches in Home Assistant (<code>switch.console_cloud_access</code>, <code>switch.console_ai</code>) and tiles on the Home dashboard.</p>
       </section>
       <section><h2>Connect Claude</h2>
-        <p class="soft">Claude can work on this house with the same tools as the chat, plus the things the chat can't do (a browser, the router's pages, a shell). ${s.site ? `In Claude Code, run these two lines, then sign in at the page that opens:` : "This house isn't linked to Console's site yet."}</p>
-        ${s.site ? `<pre>claude mcp add --transport http --scope user console ${esc(s.site)}/api/mcp/sunrise
-claude mcp login console</pre>
+        <p class="soft">Claude can work on this house with the same tools as the chat, plus the things the chat can't do (a browser, the router's pages, a shell). ${s.site ? `In a terminal, add this house to Claude Code:` : "This house isn't linked to Console's site yet."}</p>
+        ${s.site ? `<pre>claude mcp add --transport http --scope user console ${esc(s.site)}/api/mcp/sunrise</pre>
+        <p class="soft">Then, inside Claude Code, type <code>/mcp</code>, pick <b>console</b> and choose <b>Authenticate</b>. A browser opens: sign in with Google if it asks, then with your Home Assistant username and password. (Newer versions of Claude Code can also do this step from the terminal: <code>claude mcp login console</code>.)</p>
         <p class="soft">In Claude on the web or phone: Settings → Connectors → Add custom connector, with the address <code>${esc(s.site)}/api/mcp/sunrise</code>.</p>` : ""}
       </section>
       <section><h2>Backups and your recovery code</h2>

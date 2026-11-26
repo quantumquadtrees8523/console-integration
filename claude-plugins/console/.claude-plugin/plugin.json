@@ -1,6 +1,6 @@
 {
   "name": "console",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Install Console on a Home Assistant box, connect Claude Code to the house through Console's relay, and manage support mode.",
   "author": {
     "name": "Console"
