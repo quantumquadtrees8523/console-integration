@@ -65,6 +65,8 @@ class ConfigView(HomeAssistantView):
         data: ConsoleData = hass.data[DOMAIN]
         if data.data.get("unlinked"):
             return self.json_message("This house erased its link to Console. Someone here has to connect it again.", 409)
+        if not data.switch("cloud"):
+            return self.json_message("Cloud access is turned off for this house.", 423)
         data.apply_relay_config(body)
         await data.async_save_now()
         return self.json(_report(hass, data))

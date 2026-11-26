@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 
 
@@ -67,19 +68,53 @@ UNLINKED = (
 
 
 CLOUD_OFF = (
-    "Console's cloud agent is turned off for this house. Plain commands still run at home. Turn it back on "
-    "on the Console page, under Settings."
+    "Cloud access is turned off for this house: it is off Console's relay, so nothing reaches it from "
+    "outside and Console's cloud agent is off. Plain commands still run at home. It can only be turned back "
+    "on from inside the house, on the Console page under Settings."
 )
 AI_OFF = (
     "AI is turned off for this house: Console's cloud agent, Claude and any other AI agent can't read or "
     "change anything here. Plain commands still run at home. Turn it back on on the Console page, under Settings."
 )
 CLOUD_OFF_REPLY = (
-    "I couldn't do that one: Console's cloud agent is turned off for this house, so I can only do plain "
-    "commands like \u201cturn off the kitchen lights\u201d."
+    "I couldn't do that one: cloud access is turned off for this house, so I can only do plain commands "
+    "like \u201cturn off the kitchen lights\u201d."
 )
 AI_OFF_REPLY = (
     "I couldn't do that one: AI is turned off for this house, so I can only do plain commands like "
     "\u201cturn off the kitchen lights\u201d."
 )
 AI_OFF_TOOLS = "AI is turned off for this house, on the Console page in Home Assistant. No AI agent can use its tools until someone there turns it back on."
+
+
+_SECRET = re.compile(r"(eyJ[\w-]{8,}\.[\w-]+\.[\w-]+|sk-[\w-]{16,}|\b[A-Za-z0-9_-]{40,}\b)")
+
+
+def _clean(text: Any) -> str:
+    """A field of a handoff, with anything that looks like a key or token taken out."""
+    return _SECRET.sub("[removed]", str(text or "").strip())
+
+
+def handoff(args: dict[str, Any]) -> str:
+    """The reply when the chat hands a request to Claude Code: plain steps, then one block to paste."""
+    asked, why = _clean(args.get("asked")), _clean(args.get("why"))
+    found, nxt = _clean(args.get("found")), _clean(args.get("next"))
+    block = [
+        "I'm working on my Home Assistant house, which runs Console and Sunrise.",
+        f"What I asked Console's chat: {asked}",
+    ]
+    if found:
+        block.append(f"What Console's chat found: {found}")
+    block += [
+        f"What I need you to do: {nxt}",
+        "Use the Sunrise tools (the MCP server named console or sunrise) for anything inside Home Assistant.",
+        "Tell me what you're about to change before you change it, and never ask me to paste a password or a key: if a sign-in is needed, open the page and let me type it.",
+    ]
+    reason = f" ({why})" if why else ""
+    return (
+        f"I can't do that from this chat{reason}. Claude Code can.\n\n"
+        "1. Open Claude Code on a computer on your home network.\n"
+        "2. Paste this, as it is:\n\n"
+        "```text\n" + "\n".join(block) + "\n```\n\n"
+        "If Claude Code isn't connected to this house yet, the Console page has the steps under Settings."
+    )

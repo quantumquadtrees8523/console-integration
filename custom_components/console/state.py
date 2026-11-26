@@ -60,7 +60,8 @@ def _fresh() -> dict[str, Any]:
         "dashboard": {},
         "made": {},  # dashboards made through the agent's `dashboard` tool, by url path
         "linked_at": None,
-        "switches": {"cloud": True, "ai": True},  # the kill switches: both on unless the household turns one off
+        "switches": {"cloud": True, "ai": True},  # the off switches (cloud access, AI): on unless the household turns one off
+        "site": None,  # the relay's address for this household, as the relay last gave it
         "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
     }
 
@@ -74,6 +75,10 @@ class ConsoleData:
         self.data: dict[str, Any] = _fresh()
         self.now = now or (lambda: datetime.now(UTC))
         self._listeners: list[Callable[[], None]] = []
+        # While a chat card waits on a turn: where to send that conversation's trail, and the earlier
+        # messages it has on screen. Held in memory for the length of the turn only.
+        self.streams: dict[str, Callable[[dict[str, Any]], None]] = {}
+        self.earlier: dict[str, list[dict[str, Any]]] = {}
 
     async def async_load(self) -> None:
         stored = await self._store.async_load()
@@ -227,6 +232,8 @@ class ConsoleData:
             self.data["plan"] = DEFAULT_PLAN | config["plan"]
         if config.get("spend"):
             self.data["relay_spend"] = config["spend"]
+        if isinstance(config.get("site"), str) and config["site"].startswith("https://"):
+            self.data["site"] = config["site"].rstrip("/")
         # The relay knows what OpenRouter has counted: it says whether the month's allowance is spent.
         self.data["limit_hit"] = self.period if config.get("over") else None
         self.data["linked_at"] = self.now().isoformat()
