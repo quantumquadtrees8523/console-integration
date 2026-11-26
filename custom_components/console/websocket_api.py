@@ -12,7 +12,7 @@ import probatio as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import dashboard, knows, wipe
+from . import backups, dashboard, knows, wipe
 from .const import DOMAIN
 from .status import status
 
@@ -32,6 +32,9 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_support_set,
         ws_wipe,
         ws_relink,
+        ws_backup_status,
+        ws_backup_code,
+        ws_backup_now,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -160,3 +163,32 @@ def ws_relink(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
     data.data["unlinked"] = False
     data.changed()
     connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/backup/status"})
+@callback
+def ws_backup_status(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    connection.send_result(msg["id"], backups.status(hass))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/backup/recovery_code"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_backup_code(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The recovery code, for an administrator to write down or download. Made here if there is none."""
+    try:
+        connection.send_result(msg["id"], await backups.recovery_code(hass))
+    except backups.Unavailable as error:
+        connection.send_error(msg["id"], "unavailable", str(error))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/backup/now"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_backup_now(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    try:
+        connection.send_result(msg["id"], await backups.backup_now(hass))
+    except backups.Unavailable as error:
+        connection.send_error(msg["id"], "unavailable", str(error))
+    except Exception as error:  # noqa: BLE001 (Home Assistant's own reason, e.g. a backup already running)
+        connection.send_error(msg["id"], "failed", str(error))

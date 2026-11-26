@@ -64,6 +64,7 @@ class ConsolePanel extends HTMLElement {
     try {
       this._status = await this._ws({ type: "console/status" });
       if (this._tab === "knows") this._knows = await this._ws({ type: "console/knows" });
+      if (this._tab === "settings") this._backup = await this._ws({ type: "console/backup/status" });
     } catch (error) { this._status = { error: String(error.message || error) }; }
     this._draw();
   }
@@ -153,6 +154,15 @@ class ConsolePanel extends HTMLElement {
         <div class="row"><button class="act ${s.switches.ai ? "danger" : ""}" data-do="switch" data-entity="switch.console_ai" data-on="${s.switches.ai ? "0" : "1"}">${s.switches.ai ? "Turn all AI off" : "Turn AI back on"}</button></div>
         <p class="soft">Both are also switches in Home Assistant (<code>switch.console_cloud_agent</code>, <code>switch.console_ai</code>), so you can put them on a dashboard.</p>
       </section>
+      <section><h2>Backups and your recovery code</h2>
+        ${this._backup && this._backup.available ? `
+        <p><b>${this._backup.encrypted ? "Backups are encrypted with your recovery code" : "No recovery code yet"}</b></p>
+        <p class="soft">Every Home Assistant backup from this box, including any copy that leaves it, is locked with your recovery code. Console's relay never keeps the code, and a backup can't be opened without it: not by Console's operator, not by anyone. Keep it somewhere safe that isn't this box. To restore on a new Home Assistant you need two things only: the backup file and this code.</p>
+        <p class="soft">Copies go to: ${esc((this._backup.copies_go_to || []).join(", "))}. ${this._backup.automatic ? "Automatic backups are on." : "Automatic backups are off: turn them on under Settings → System → Backups."}</p>
+        ${admin ? `<div class="row"><button class="act" data-do="code-show">${this._backup.encrypted ? "Show my recovery code" : "Make my recovery code"}</button><button class="act" data-do="code-download">Download recovery code</button><button class="act" data-do="backup-now">Back up now</button></div>` : ""}
+        ${this._code ? `<pre id="code">${esc(this._code)}</pre>` : ""}
+        <p class="soft">${esc(this._backupSaid || "")}</p>` : `<p class="soft">Home Assistant's backups aren't set up on this box.</p>`}
+      </section>
       <section><h2>Support mode</h2>
         <p class="soft">Off unless you turn it on. While it's on, Console's operator can open this house through Console's site and see what's in it, to help you. It turns itself off after 7 days, and everything the operator opens is listed here.</p>
         <p><b>${s.support.on ? `On until ${dayTime(s.support.until)}` : "Off"}</b></p>
@@ -185,7 +195,7 @@ class ConsolePanel extends HTMLElement {
       <main>${s.support && s.support.on ? `<div class="note on">Support mode is on until ${dayTime(s.support.until)}. Console's operator can open this house.</div>` : ""}${body}
         <p class="soft" style="text-align:center">Console ${esc(s.version)}${s.sunrise ? " · with Sunrise" : " · Sunrise isn't installed"}</p>
       </main>`;
-    root.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => { this._tab = b.dataset.tab; this._said = ""; this._editing = null; this._load(); }));
+    root.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => { this._tab = b.dataset.tab; this._said = ""; this._editing = null; this._code = null; this._load(); }));
     root.querySelectorAll("[data-do]").forEach((el) => el.addEventListener("click", (event) => { event.preventDefault(); this._do(el.dataset.do, el.dataset); }));
   }
 
@@ -199,6 +209,17 @@ class ConsolePanel extends HTMLElement {
       else if (what === "assist-clear") { const r = await this._ws({ type: "console/assist/clear" }); this._said = `Cleared ${r.cleared}.`; }
       else if (what === "rebuild") { const r = await this._ws({ type: "console/dashboard/rebuild" }); this._said = r.ok ? `Home dashboard: ${r.did}.` : r.why; }
       else if (what === "switch") { await this._hass.callService("switch", at.on === "1" ? "turn_on" : "turn_off", { entity_id: at.entity }); await new Promise((done) => setTimeout(done, 300)); }
+      else if (what === "code-show") { this._code = (await this._ws({ type: "console/backup/recovery_code" })).code; }
+      else if (what === "code-download") {
+        const got = await this._ws({ type: "console/backup/recovery_code" });
+        const text = `Console recovery code\n\n${got.code}\n\nKeep this somewhere safe that isn't your Home Assistant box.\nTo restore a backup on a new Home Assistant: choose "Restore from backup" on its first screen, upload the backup file, and type this code when it asks for the encryption key.\nConsole's relay doesn't have this code. If you lose it, your backups can't be opened.\n`;
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+        link.download = "console-recovery-code.txt";
+        link.click();
+        this._backupSaid = "Downloaded console-recovery-code.txt.";
+      }
+      else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
       else if (what === "relink") { await this._ws({ type: "console/relink" }); this._wipeSaid = "Connected again. The cloud agent comes back when the relay next checks in."; }
       else if (what === "wipe") {
@@ -207,7 +228,7 @@ class ConsolePanel extends HTMLElement {
         this._wipeSaid = at.level === "factory" ? "Home Assistant is restarting as a new install. This page will stop answering." : "Erased. Console and Sunrise have started again with nothing remembered, and this house is no longer connected to Console.";
         if (r.restarting) return this._draw();
       }
-    } catch (error) { if (what === "wipe" || what === "relink") this._wipeSaid = String(error.message || error); else this._said = String(error.message || error); }
+    } catch (error) { if (what.startsWith("code-") || what === "backup-now") this._backupSaid = String(error.message || error); else if (what === "wipe" || what === "relink") this._wipeSaid = String(error.message || error); else this._said = String(error.message || error); }
     await this._load();
   }
 }

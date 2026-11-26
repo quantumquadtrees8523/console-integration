@@ -1,7 +1,7 @@
 {
   "domain": "console",
   "name": "Console",
-  "after_dependencies": ["sunrise", "assist_pipeline", "mcp_server"],
+  "after_dependencies": ["sunrise", "assist_pipeline", "mcp_server", "backup"],
   "codeowners": ["@quantumquadtrees8523"],
   "config_flow": true,
   "dependencies": ["conversation", "http", "frontend", "panel_custom", "homeassistant", "lovelace", "persistent_notification"],
@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/quantumquadtrees8523/console-integration/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.4.0"
+  "version": "0.5.0"
 }
