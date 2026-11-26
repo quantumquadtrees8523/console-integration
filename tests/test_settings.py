@@ -87,15 +87,18 @@ async def test_erasing_data_forgets_everything_and_cuts_the_link_to_the_relay(ha
     console.count_turn("flash", "status", True)
     console.data["learned"].append({"id": "a1", "sentence": "movie time", "action": "light.turn_off", "entity_ids": ["light.kitchen"], "data": {}})
     console.learned.start()
+    console.history.add("someone", "you", "remember the surprise party")
+    console.history.add("someone", "console", "I will.")
     sunrise = Path(hass.config.path("sunrise"))
     (sunrise / "memory").mkdir(parents=True)
     (sunrise / "memory" / "owner.md").write_text("# Owner\nLikes it dim.\n")
 
     answer = await ws(hass, hass_ws_client, {"type": "console/wipe", "level": "data", "confirm": "Erase my data "})
     assert answer["success"] is True, answer
-    assert answer["result"]["erased"] == {"console_store": True, "learned_sentences": 1, "sunrise_data": True}
+    assert answer["result"]["erased"] == {"console_store": True, "learned_sentences": 1, "chat_messages": 2, "sunrise_data": True}
     assert not sunrise.exists()
     assert console.key() is None and console.data["learned"] == [] and console.summary()["turns"] == 0
+    assert console.history.total() == 0
     assert console.summary()["spend_usd"] == 0 and console.cloud_state() == "not_linked"
     assert hass.states.get("sensor.console_cloud_agent").attributes["banner"] == wording.UNLINKED
     assert await ask(hass, "what should I automate next in this house") == wording.NOT_LINKED_REPLY

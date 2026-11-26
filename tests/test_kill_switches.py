@@ -1,4 +1,4 @@
-"""The two kill switches: the cloud agent, and all AI."""
+"""The two off switches: cloud access, and all AI."""
 
 from __future__ import annotations
 
@@ -19,13 +19,13 @@ async def turn(hass, entity_id: str, on: bool) -> None:
 
 
 async def test_both_switches_are_on_until_someone_turns_one_off(hass, console):
-    assert hass.states.get("switch.console_cloud_agent").state == "on"
+    assert hass.states.get("switch.console_cloud_access").state == "on"
     assert hass.states.get("switch.console_ai").state == "on"
 
 
-async def test_with_the_cloud_agent_off_every_request_takes_the_local_path(hass, console, model, lights_off):
+async def test_with_cloud_access_off_every_request_takes_the_local_path(hass, console, model, lights_off):
     link(console)
-    await turn(hass, "switch.console_cloud_agent", False)
+    await turn(hass, "switch.console_cloud_access", False)
     sensor = hass.states.get("sensor.console_cloud_agent")
     assert sensor.state == "cloud_off" and sensor.attributes["banner"] == wording.CLOUD_OFF
     await ask(hass, "turn off the kitchen light")
@@ -34,13 +34,13 @@ async def test_with_the_cloud_agent_off_every_request_takes_the_local_path(hass,
     assert model.calls == []  # not one model call
     assert console.summary()["by_route"] == {"local": 1, "flash_fast": 0, "flash": 0, "pro": 0, "fallback": 1, "other_agent": 0}
 
-    await turn(hass, "switch.console_cloud_agent", True)
+    await turn(hass, "switch.console_cloud_access", True)
     model.say("Back. [[other]]")
     assert await ask(hass, "are you there again") == "Back."
 
 
 async def test_the_cloud_switch_leaves_other_agents_alone(hass, console):
-    await turn(hass, "switch.console_cloud_agent", False)
+    await turn(hass, "switch.console_cloud_access", False)
     context = llm.LLMContext(platform="mcp_server", context=Context(), language="en", assistant="conversation", device_id=None)
     instance = await llm.async_get_api(hass, "assist", context)
     assert instance.tools
@@ -87,8 +87,22 @@ async def test_erasing_data_never_turns_ai_back_on(hass, console):
 
 
 async def test_the_switches_survive_a_restart(hass, console):
-    await turn(hass, "switch.console_cloud_agent", False)
+    await turn(hass, "switch.console_cloud_access", False)
     await console.async_save_now()
     again = type(console)(hass)
     await again.async_load()
     assert again.switch("cloud") is False and again.switch("ai") is True
+
+
+async def test_with_cloud_access_off_the_relay_is_refused(hass, console, hass_client):
+    """The hub drops the tunnel when this switch goes off; a handover that still arrives is refused too."""
+    await turn(hass, "switch.console_cloud_access", False)
+    client = await hass_client()
+    refused = await client.post("/api/console/relay/config", json={"plan": {"tier": "free"}})
+    assert refused.status == 423 and console.key() is None
+    status = await (await client.get("/api/console/relay/status")).json()
+    assert status["switches"] == {"cloud": False, "ai": True}
+
+
+async def test_the_old_cloud_agent_switch_is_gone(hass, console):
+    assert hass.states.get("switch.console_cloud_agent") is None

@@ -30,8 +30,8 @@ class Model:
         self.calls: list[dict[str, Any]] = []
         self.cost = 0.001
 
-    def say(self, text: str) -> None:
-        self.script.append({"role": "assistant", "content": text})
+    def say(self, text: str, thinking: str = "") -> None:
+        self.script.append({"role": "assistant", "content": text} | ({"thinking": thinking} if thinking else {}))
 
     def call_tool(self, name: str, args: dict[str, Any], call_id: str = "call_1") -> None:
         import json
@@ -42,13 +42,20 @@ class Model:
     def fail(self, error: Exception) -> None:
         self.script.append(error)
 
-    async def complete(self, session, inference, model, messages, tools, effort, timeout_s=25):
+    async def complete(self, session, inference, model, messages, tools, effort, timeout_s=25, on_delta=None):
         self.calls.append({"model": model, "messages": messages, "tools": tools, "effort": effort, "key": inference["key"]})
         assert self.script, f"the model was called more often than the test expected: {messages[-1]}"
         answer = self.script.pop(0)
         if isinstance(answer, Exception):
             raise answer
-        return openrouter.Completion(message=answer, cost_usd=self.cost, model=model)
+        thinking = answer.pop("thinking", "") if isinstance(answer, dict) else ""
+        if on_delta is not None:  # a card is listening: hand the answer over in pieces, as a stream would
+            if thinking:
+                on_delta("thinking", thinking)
+            text = answer.get("content") or ""
+            for start in range(0, len(text), 7):
+                on_delta("text", text[start : start + 7])
+        return openrouter.Completion(message=answer, cost_usd=self.cost, model=model, thinking=thinking)
 
 
 @pytest.fixture

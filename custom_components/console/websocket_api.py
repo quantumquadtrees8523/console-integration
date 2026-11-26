@@ -5,6 +5,7 @@ Reading is for anyone signed in to Home Assistant. Changing or deleting anything
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import probatio as vol
@@ -12,9 +13,11 @@ import probatio as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import backups, dashboard, knows, wipe
+from . import backups, dashboard, knows, wipe, wording
 from .const import DOMAIN
 from .status import status
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @callback
@@ -35,6 +38,9 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_backup_status,
         ws_backup_code,
         ws_backup_now,
+        ws_chat,
+        ws_chat_history,
+        ws_chat_clear,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -62,7 +68,9 @@ def ws_onboarding_offered(hass: HomeAssistant, connection: websocket_api.ActiveC
 @websocket_api.async_response
 async def ws_knows(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """What the house knows about the people in it."""
-    connection.send_result(msg["id"], await knows.everything(hass, hass.data[DOMAIN]))
+    answer = await knows.everything(hass, hass.data[DOMAIN])
+    answer["my_chat_messages"] = hass.data[DOMAIN].history.count(connection.user.id)
+    connection.send_result(msg["id"], answer)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/memory/read", vol.Required("name"): str})
@@ -192,3 +200,86 @@ async def ws_backup_now(hass: HomeAssistant, connection: websocket_api.ActiveCon
         connection.send_error(msg["id"], "unavailable", str(error))
     except Exception as error:  # noqa: BLE001 (Home Assistant's own reason, e.g. a backup already running)
         connection.send_error(msg["id"], "failed", str(error))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "console/chat",
+        vol.Required("text"): str,
+        vol.Optional("conversation_id"): vol.Any(str, None),
+        vol.Optional("earlier", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=40)),
+    }
+)
+@websocket_api.async_response
+async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """One turn with Console's agent, told as it happens. The answer to the command is the conversation's
+    id; then events follow (trail.py): steps, thinking, pieces of the reply, and at last `done` with the
+    whole reply. What was said goes into this person's chat history on the box."""
+    import secrets  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    from homeassistant.components import conversation  # noqa: PLC0415
+
+    data = hass.data[DOMAIN]
+    user_id = connection.user.id
+    text = msg["text"].strip()
+    conversation_id = msg.get("conversation_id") or f"console-{secrets.token_hex(8)}"
+
+    def send(event: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], event))
+
+    connection.subscriptions[msg["id"]] = lambda: data.streams.pop(conversation_id, None)
+    connection.send_result(msg["id"], {"conversation_id": conversation_id})
+    if not text:
+        send({"kind": "done", "reply": "", "conversation_id": conversation_id, "error": True})
+        return
+    if msg["earlier"]:
+        data.earlier[conversation_id] = data.history.last(user_id, msg["earlier"])
+    data.streams[conversation_id] = send
+    data.history.add(user_id, "you", text)
+    started = time.monotonic()
+    try:
+        result = await conversation.async_converse(
+            hass, text, conversation_id, connection.context(msg), hass.config.language, agent_id="conversation.console"
+        )
+        speech = (result.response.speech.get("plain") or {}).get("speech") or ""
+        failed = result.response.response_type.value == "error"
+        conversation_id_now = result.conversation_id or conversation_id
+    except Exception as error:  # noqa: BLE001 (whatever went wrong, the card must hear the end of the turn)
+        speech, failed, conversation_id_now = wording.MODEL_FAILED_REPLY, True, conversation_id
+        hass.data[DOMAIN].streams.pop(conversation_id, None)
+        _LOGGER.warning("Console: a chat turn failed (%s)", type(error).__name__)
+    finally:
+        data.streams.pop(conversation_id, None)
+        data.earlier.pop(conversation_id, None)
+    data.history.add(user_id, "console", speech, **({"failed": True} if failed else {}))
+    send(
+        {
+            "kind": "done",
+            "reply": speech,
+            "conversation_id": conversation_id_now,
+            "error": failed,
+            "ms": round((time.monotonic() - started) * 1000),
+        }
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "console/chat/history",
+        vol.Optional("before"): vol.Any(vol.Coerce(int), None),
+        vol.Optional("limit", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+    }
+)
+@callback
+def ws_chat_history(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """This person's earlier chat messages, a page at a time, newest page first."""
+    history = hass.data[DOMAIN].history
+    connection.send_result(msg["id"], history.page(connection.user.id, msg.get("before"), msg["limit"]))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/clear"})
+@callback
+def ws_chat_clear(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Delete this person's chat history from the box."""
+    connection.send_result(msg["id"], {"deleted": hass.data[DOMAIN].history.clear(connection.user.id)})

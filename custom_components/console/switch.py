@@ -1,8 +1,14 @@
-"""The kill switches as Home Assistant switches, so they can sit on a dashboard or in an automation.
+"""The two off switches as Home Assistant switches, so they can sit on a dashboard or in an automation.
 
-- switch.console_cloud_agent: Console's cloud agent. Off: requests are answered at home only.
+- switch.console_cloud_access: cloud access. Off: the house is off Console's relay. The hub drops its
+  tunnel and doesn't dial again, so nothing reaches the house from outside (no opening it away from home,
+  no Claude through the connector, no operator), and Console sends nothing out: its cloud agent is off,
+  no key is renewed, no usage is reported. It can only be turned back on from inside the house.
 - switch.console_ai: AI in this house. Off: no AI agent (Console's, Claude, any other) can use the
-  house's tools.
+  house's tools. Only Home Assistant's own sentence matching answers.
+
+Neither is a firewall: other things on the box that use the internet by themselves (Home Assistant
+Cloud, a music service, HACS) are not affected by them.
 """
 
 from __future__ import annotations
@@ -12,19 +18,25 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DOMAIN
 from .state import ConsoleData
+
+OLD_CLOUD_SWITCH = "switch.console_cloud_agent"
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     data: ConsoleData = hass.data[DOMAIN]
+    registry = er.async_get(hass)
+    if registry.async_get(OLD_CLOUD_SWITCH):  # 0.3 to 0.5 called it the cloud agent switch
+        registry.async_remove(OLD_CLOUD_SWITCH)
     async_add_entities(
         [
-            KillSwitch(data, entry, "cloud", "switch.console_cloud_agent", "Console cloud agent", "mdi:cloud-outline"),
+            KillSwitch(data, entry, "cloud", "switch.console_cloud_access", "Cloud access", "mdi:cloud-outline"),
             KillSwitch(data, entry, "ai", "switch.console_ai", "AI in this house", "mdi:robot-outline"),
         ]
     )
@@ -40,7 +52,7 @@ class KillSwitch(SwitchEntity):
         self.entity_id = entity_id
         self._attr_name = name
         self._attr_icon = icon
-        self._attr_unique_id = f"{entry.entry_id}_switch_{key}"
+        self._attr_unique_id = f"{entry.entry_id}_switch_{'cloud_access' if key == 'cloud' else key}"
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.data.listen(self._changed))

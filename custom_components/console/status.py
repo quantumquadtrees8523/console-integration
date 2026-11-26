@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from . import dashboard, wording
 from .const import VERSION
+from .credits import credits
 from .state import ConsoleData, next_reset
 
 
@@ -49,6 +50,8 @@ def status(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "support": {"on": data.support.on(), "until": data.data["support"].get("until"), "log": list(data.data["support"].get("log") or [])[-30:]},
         "unlinked": bool(data.data.get("unlinked")),
         "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai")},
+        "credits": {"used": credits(data.spend_usd), "allowed": credits(data.cap_usd)},
+        "site": data.data.get("site"),
         "onboarding": dict(data.data["onboarding"]),
         "learned": len(data.data["learned"]),
         "dashboard": {"url": f"/{dashboard.URL_PATH}", "written": bool((data.data.get("dashboard") or {}).get("written"))},

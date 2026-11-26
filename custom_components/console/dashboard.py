@@ -22,7 +22,7 @@ TITLE = "Home"
 ICON = "mdi:home-heart"
 _LOGGER = logging.getLogger(__name__)
 
-OWN = ("switch.console_cloud_agent", "switch.console_ai")
+OWN = ("switch.console_cloud_access", "switch.console_ai", "switch.console_cloud_agent")
 # (section title, icon, domains), in the order they appear after the chat card.
 GROUPS = (
     ("Lights", "mdi:lightbulb-group", ("light",)),
@@ -98,7 +98,7 @@ def build(hass: HomeAssistant) -> dict[str, Any]:
             "cards": [
                 {"type": "heading", "heading": "Console", "heading_style": "title", "icon": ICON},
                 {"type": "custom:console-chat-card", "title": "", "grid_options": {"columns": "full", "rows": 7}},
-                {"type": "tile", "entity": "switch.console_cloud_agent", "name": "Cloud agent"},
+                {"type": "tile", "entity": "switch.console_cloud_access", "name": "Cloud access"},
                 {"type": "tile", "entity": "switch.console_ai", "name": "AI in this house"},
             ],
         }
@@ -257,3 +257,27 @@ async def remove(hass: HomeAssistant, data) -> None:
         for item in list(collection.async_items()):
             if item.get("url_path") == URL_PATH:
                 await collection.async_delete_item(item["id"])
+
+
+async def ensure_resource(hass: HomeAssistant, url: str) -> str:
+    """Register the chat card as a dashboard resource. Dashboards load their resources fresh each
+    time, so the card is there in the phone and tablet apps too, which keep an old copy of the page that
+    lists start-up scripts. Returns what was done."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    lovelace = hass.data.get(LOVELACE_DATA)
+    resources = getattr(lovelace, "resources", None)
+    if resources is None or not hasattr(resources, "async_create_item"):
+        return "dashboards here keep their resources in YAML: add the card's address by hand"
+    if not getattr(resources, "loaded", True):
+        await resources.async_load()
+        resources.loaded = True
+    base = url.split("?")[0]
+    for item in list(resources.async_items()):
+        if str(item.get("url", "")).split("?")[0] == base:
+            if item["url"] == url:
+                return "unchanged"
+            await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
+            return "updated"
+    await resources.async_create_item({"res_type": "module", "url": url})
+    return "added"

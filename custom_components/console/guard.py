@@ -1,8 +1,6 @@
-"""The two kill switches.
+"""The AI off switch (the cloud access switch is in switch.py and in the hub).
 
-- Cloud agent off: Console's agent makes no model calls. Every request goes to Home Assistant's own
-  agent, at home; anything it can't do is answered with a plain "the cloud agent is off".
-- AI off: that, and no AI agent can use this house's tools. Home Assistant hands tools to AI agents
+- AI off: no AI agent can use this house's tools. Home Assistant hands tools to AI agents
   through its LLM APIs (Sunrise's, and its own Assist API): Claude through the MCP server, Console's
   agent, and any other AI integration all ask there. With AI off, every such request is refused.
 

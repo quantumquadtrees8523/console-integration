@@ -14,16 +14,86 @@ import probatio as vol
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
 
-from . import dashboard
+from . import dashboard, music
 from .const import DOMAIN, NAME
 
 API_ID = DOMAIN
 
 PROMPT = (
-    "Console's tools: `dashboard` makes a dashboard for rooms or things the person names (op=create), lists "
-    "the ones made this way (op=list) and removes one (op=remove). After creating one, tell the person its "
-    "name and that it's in the sidebar. Only remove a dashboard the person asked you to remove."
+    "Console's tools: `music` is for anything about music and speakers: search the household's music "
+    "services, read their playlists and library, play by name or uri on a room's speaker, show the queue, "
+    "move it to another room, pause, skip, seek and set volume. For a request like \"play X by Y in the kitchen "
+    "at 60\", call it once with op=play, what, artist, room and volume; search first only when the name is "
+    "unclear, then play the result's uri. `dashboard` makes a dashboard for rooms or things the person names "
+    "(op=create), lists the ones made this way (op=list) and removes one (op=remove). `about` returns "
+    "Console's own facts (versions, the plan and credits, the off switches, what this chat can and can't do): "
+    "call it before answering a question about Console itself."
 )
+
+
+def music_players(hass: HomeAssistant) -> list[dict[str, Any]]:
+    return music.players(hass)
+
+
+class MusicTool(llm.Tool):
+    integration = DOMAIN
+    name = "music"
+    title = "Music and speakers"
+    description = (
+        "Search, browse and play music through Music Assistant (Spotify and the household's other music "
+        "services), and control the speakers. op=speakers lists them. op=search needs query (optional artist, "
+        "kind). op=library lists the household's own playlists, albums, artists or tracks (kind; optional "
+        "query, favorites). op=play needs what (a name or a uri) and room; optional artist, album, kind, "
+        "volume 0-100, mode (play, replace, next, add) and radio=true for more like it. op=queue needs room. "
+        "op=move needs room and to. op=control needs room and action (pause, resume, stop, next, previous, "
+        "shuffle_on, shuffle_off, repeat_off, repeat_all, repeat_one, mute, unmute, volume with volume, seek "
+        "with seconds). Play and move answer CHECKED when the speaker is really playing."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required("op", description="speakers, search, library, play, queue, move or control"): vol.In(
+                ["speakers", "search", "library", "play", "queue", "move", "control"]
+            ),
+            vol.Optional("query", description="what to search for"): str,
+            vol.Optional("what", description="what to play: a name, or a uri from search or library"): str,
+            vol.Optional("artist"): str,
+            vol.Optional("album"): str,
+            vol.Optional("kind", description="track, album, artist, playlist, radio, podcast or audiobook"): str,
+            vol.Optional("room", description="the speaker, by its room or name"): str,
+            vol.Optional("to", description="the speaker to move the music to"): str,
+            vol.Optional("volume", description="0 to 100"): vol.Coerce(int),
+            vol.Optional("mode", description="play, replace, next or add"): str,
+            vol.Optional("radio", description="keep playing similar music afterwards"): bool,
+            vol.Optional("favorites", description="only favorites, for op=library"): bool,
+            vol.Optional("action", description="for op=control"): str,
+            vol.Optional("seconds", description="for action=seek"): vol.Coerce(int),
+        }
+    )
+    annotations = llm.ToolAnnotations(read_only=False, destructive=False, idempotent=False, open_world=True)
+
+    async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> llm.ToolResult:
+        try:
+            return llm.ToolResult(data=await music.run(hass, dict(tool_input.tool_args or {})), error=False)
+        except music.Refused as error:
+            return llm.ToolResult(data={"error": str(error)}, error=False)
+
+
+class AboutTool(llm.Tool):
+    integration = DOMAIN
+    name = "about"
+    title = "About Console"
+    description = (
+        "Console's own facts, read live: versions, the plan and this month's credits, the two off switches, "
+        "support mode, the relay's address, which tools and music services this house has, and what this "
+        "chat can't do and hands to Claude Code. Call it before answering anything about Console itself."
+    )
+    parameters = vol.Schema({})
+    annotations = llm.ToolAnnotations(read_only=True, destructive=False, idempotent=True, open_world=False)
+
+    async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> llm.ToolResult:
+        from . import about  # noqa: PLC0415
+
+        return llm.ToolResult(data=await about.facts(hass), error=False)
 
 
 class DashboardTool(llm.Tool):
@@ -77,4 +147,4 @@ class ConsoleAPI(llm.API):
         super().__init__(hass=hass, id=API_ID, name=NAME)
 
     async def async_get_api_instance(self, llm_context: llm.LLMContext) -> llm.APIInstance:
-        return llm.APIInstance(api=self, api_prompt=PROMPT, llm_context=llm_context, tools=[DashboardTool()])
+        return llm.APIInstance(api=self, api_prompt=PROMPT, llm_context=llm_context, tools=[MusicTool(), DashboardTool(), AboutTool()])

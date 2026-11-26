@@ -19,6 +19,7 @@ from homeassistant.helpers import llm
 from . import dashboard, relay_api, tools, websocket_api
 from .const import DOMAIN, PANEL_URL, STATIC_URL, VERSION
 from .guard import AiGuard
+from .history import ChatHistory
 from .learned import Learned
 from .others import OtherAgents
 from .state import ConsoleData
@@ -37,6 +38,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data.others = OtherAgents(hass, data)
     data.support = Support(hass, data)
     data.guard = AiGuard(hass, data)
+    data.history = ChatHistory(hass)
+    await data.history.async_load()
     hass.data[DOMAIN] = data
 
     if not hass.data.get(f"{DOMAIN}_served"):
@@ -76,6 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def build_dashboard(_event=None) -> None:
         """Once the house's things are all loaded: make the Home dashboard, or bring it up to date."""
         try:
+            await dashboard.ensure_resource(hass, CARD_URL)
             await dashboard.ensure(hass, data)
         except Exception:  # noqa: BLE001 (a dashboard that can't be built mustn't stop Console)
             _LOGGER.exception("Console: the Home dashboard couldn't be built")
