@@ -118,3 +118,44 @@ def handoff(args: dict[str, Any]) -> str:
         "```text\n" + "\n".join(block) + "\n```\n\n"
         "If Claude Code isn't connected to this house yet, the Console page has the steps under Settings."
     )
+
+
+# --- suggested routines --------------------------------------------------------------------------
+
+SUGGESTIONS_ON_TITLE = "Nightly suggestions are on"
+SUGGESTIONS_ON = (
+    "Each night Console's cloud agent looks at how your house is used and suggests a few routines in the chat. "
+    "This uses some of this month's credits every night, so your allowance runs down faster. Turn it off any "
+    "time on the Console page, under Settings."
+)
+SUGGESTIONS_COST = (
+    "Each night's run uses some of this month's credits, so the allowance runs down faster. It's skipped once "
+    "80% of the month's allowance is used, and whenever the cloud agent is off."
+)
+SUGGESTIONS_NO_SUNRISE = "Suggested routines need Sunrise, and it isn't installed."
+SUGGESTION_GONE = "That suggestion isn't here any more."
+SUGGESTION_DIDNT_RUN = "That suggestion didn't run. Nothing changed."
+
+
+def _what_changed(things: list[dict[str, Any]]) -> str:
+    shown = [f"{t.get('name') or t.get('id')} is {t.get('now')}" for t in things[:4] if t.get("now") not in (None, "missing")]
+    return (", ".join(shown) + ".") if shown else ""
+
+
+def suggestion_ran(name: str, things: list[dict[str, Any]], taps: int, keep_after: int, kept: bool) -> str:
+    done = f"Done: “{name}” ran. {_what_changed(things)}".strip()
+    if kept:
+        return (
+            f"{done} That's {keep_after} times, so it's yours now: it runs by itself from here on. "
+            "To take it back, say “undo that routine” or remove it under Settings → Automations."
+        )
+    left = keep_after - taps
+    return f"{done} Tap it {left} more time{'s' if left != 1 else ''} and it runs by itself."
+
+
+def suggestion_tapped(name: str) -> str:
+    return f"Run \u201c{name}\u201d"
+
+
+def suggestion_dismissed(name: str) -> str:
+    return f"Removed “{name}”. I won't suggest it again."

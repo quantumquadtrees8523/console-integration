@@ -66,6 +66,7 @@ class ConsolePanel extends HTMLElement {
       this._status = await this._ws({ type: "console/status" });
       if (this._tab === "knows") this._knows = await this._ws({ type: "console/knows" });
       if (this._tab === "settings") this._backup = await this._ws({ type: "console/backup/status" });
+      if (this._tab === "settings") { try { this._sugg = await this._ws({ type: "console/suggestions" }); } catch (e) { this._sugg = null; } }
     } catch (error) { this._status = { error: String(error.message || error) }; }
     this._draw();
   }
@@ -154,6 +155,7 @@ class ConsolePanel extends HTMLElement {
         <p class="soft">Console builds the Home dashboard from your house: the chat, then lights, speakers and the rest of what you've exposed to Assist. It keeps it up to date until you edit it by hand.</p>
         <div class="row"><a href="${esc((s.dashboard || {}).url || "/console-home")}">Open Home</a>${admin ? `<button class="act" data-do="rebuild">Rebuild it from the house</button>` : ""}</div>
         <p class="soft">${esc(this._said)}</p></section>
+      ${this._suggestionsSection(admin)}
       <section><h2>Off switches</h2>
         <p><b>Cloud access: ${s.switches.cloud ? "on" : "off"}</b></p>
         <p class="soft">Off: this house is off Console's relay. Nothing reaches it from outside: no opening it away from home, no Claude through the connector, no access for Console's operator. And Console sends nothing out: its cloud agent is off, no key is renewed, no usage totals are reported. Plain commands still work. <b>It can only be turned back on from inside the house</b>, on your home network. It is not a firewall: other things on this box that use the internet by themselves (Home Assistant Cloud, a music service, HACS) carry on.</p>
@@ -196,6 +198,25 @@ class ConsolePanel extends HTMLElement {
         <div class="row"><input type="text" id="wipe-factory" placeholder="factory reset" autocomplete="off" style="max-width:220px"><button class="act danger" data-do="wipe" data-level="factory">Factory reset Home Assistant</button></div>
       </section>` : `<section><p class="soft">Erasing data and factory reset are for Home Assistant administrators.</p></section>`}
       <p class="soft">${esc(this._wipeSaid || "")}</p>`;
+  }
+
+  _suggestionsSection(admin) {
+    const g = this._sugg;
+    if (!g) return "";
+    if (!g.available) return `<section><h2>Suggested routines</h2><p class="soft">Suggested routines need Sunrise, and it isn't installed.</p></section>`;
+    const last = g.last_run;
+    const lastLine = last ? (last.ran ? `Last run ${dayTime(last.at)}: ${last.made} new, ${credits(Math.round((last.cost_usd || 0) * 1000) / 10)} used.` : `Last run ${dayTime(last.at)} was skipped (${esc(last.why)}).`) : "It hasn't run yet.";
+    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} of ${i.keep_after} runs${admin ? ` <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
+    const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">kept ${dayTime(k.at)}</td></tr>`).join("");
+    return `<section><h2>Suggested routines</h2>
+        <p><b>Nightly suggestions: ${g.on ? "on" : "off"}</b></p>
+        <p class="soft">Each night Console's cloud agent looks at how the house is used and suggests up to 3 routines in the chat. A suggestion is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it. After 5 taps it's kept and runs by itself. One nobody taps for 7 days is removed, and a removed one is never suggested again.</p>
+        <div class="note">${esc(g.cost_note)}</div>
+        ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn nightly suggestions off" : "Turn nightly suggestions on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
+        <p class="soft">${esc(lastLine)}</p>
+        ${items ? `<table>${items}</table>` : `<p class="soft">No suggestions waiting.</p>`}
+        ${kept ? `<h2 style="margin-top:16px">Kept</h2><table>${kept}</table><p class="soft">A kept routine is an ordinary automation: change or remove it under Settings → Automations, or ask the chat to undo it.</p>` : ""}
+        <p class="soft">${esc(this._suggSaid || "")}</p></section>`;
   }
 
   _draw() {
@@ -243,6 +264,12 @@ class ConsolePanel extends HTMLElement {
       }
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
+      else if (what === "sugg-set") {
+        if (at.on === "1" && !confirm("Turn nightly suggestions on? Each night's run uses some of this month's credits, so the allowance runs down faster.")) return;
+        await this._ws({ type: "console/suggestions/set", on: at.on === "1" }); this._suggSaid = "";
+      }
+      else if (what === "sugg-run") { this._suggSaid = "Looking at the house…"; this._draw(); const r = await this._ws({ type: "console/suggestions/run" }); this._suggSaid = r.ran ? `${r.made} new suggestion${r.made === 1 ? "" : "s"}.` : `Skipped: ${r.why}.`; }
+      else if (what === "sugg-dismiss") { const r = await this._ws({ type: "console/suggestions/dismiss", suggestion_id: at.id }); this._suggSaid = r.reply; }
       else if (what === "relink") { await this._ws({ type: "console/relink" }); this._wipeSaid = "Connected again. The cloud agent comes back when the relay next checks in."; }
       else if (what === "wipe") {
         const typed = this.shadowRoot.getElementById(`wipe-${at.level}`).value;
@@ -250,7 +277,7 @@ class ConsolePanel extends HTMLElement {
         this._wipeSaid = at.level === "factory" ? "Home Assistant is restarting as a new install. This page will stop answering." : "Erased. Console and Sunrise have started again with nothing remembered, and this house is no longer connected to Console.";
         if (r.restarting) return this._draw();
       }
-    } catch (error) { if (what.startsWith("code-") || what === "backup-now") this._backupSaid = String(error.message || error); else if (what === "wipe" || what === "relink") this._wipeSaid = String(error.message || error); else this._said = String(error.message || error); }
+    } catch (error) { if (what.startsWith("code-") || what === "backup-now") this._backupSaid = String(error.message || error); else if (what === "wipe" || what === "relink") this._wipeSaid = String(error.message || error); else if (what.startsWith("sugg-")) this._suggSaid = String(error.message || error); else this._said = String(error.message || error); }
     await this._load();
   }
 }

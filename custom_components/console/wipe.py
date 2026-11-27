@@ -1,7 +1,7 @@
 """The two ways to wipe, from the Console page. Each needs its words typed exactly.
 
 1. Erase Console and Sunrise data: Console's store (the inference key, the plan, this month's counts,
-   learned sentences, support mode), everyone's chat history and Sunrise's data folder (its memory, its history, edited skills).
+   learned sentences, support mode, suggested routines: the ones still waiting are removed from the automations), everyone's chat history and Sunrise's data folder (its memory, its history, edited skills).
    The house's link to Console's relay is cut: the relay is refused until someone connects it again.
    Home Assistant itself, its devices, dashboards and automations are untouched.
 2. Factory reset Home Assistant: everything in Home Assistant's configuration folder except the
@@ -42,6 +42,7 @@ async def erase_data(hass: HomeAssistant, confirm: str) -> dict:
     data = hass.data[DOMAIN]
     data.learned.stop()
     learned = len(data.data["learned"])
+    suggested = await data.suggestions.dismiss_all() if getattr(data, "suggestions", None) else 0
     chats = await data.history.async_erase()
     await data.async_erase()
     data.data["unlinked"] = True
@@ -60,7 +61,8 @@ async def erase_data(hass: HomeAssistant, confirm: str) -> dict:
     _LOGGER.warning("Console: Console and Sunrise data were erased from the Console page")
     return {
         "ok": True,
-        "erased": {"console_store": True, "learned_sentences": learned, "chat_messages": chats, "sunrise_data": had_sunrise},
+        "erased": {"console_store": True, "learned_sentences": learned, "chat_messages": chats, "sunrise_data": had_sunrise,
+                   "suggestions": suggested},
     }
 
 
