@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import secrets
 from typing import Any
 
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
+from homeassistant.util import dt as dt_util
 
 URL_PATH = "console-home"
 TITLE = "Home"
@@ -281,3 +283,275 @@ async def ensure_resource(hass: HomeAssistant, url: str) -> str:
             return "updated"
     await resources.async_create_item({"res_type": "module", "url": url})
     return "added"
+
+
+# --- A dashboard the agent writes itself: get, check, save, undo --------------------------------------
+#
+# `make` builds a fixed layout of tiles. These let the agent write the whole config instead (maps, graphs,
+# conditional cards, stacks), through Home Assistant's own dashboard store, never a file. Every save keeps
+# what was there before, so one `undo` puts it back.
+
+CONFIG_MAX = 256_000  # characters of JSON; a big hand-made dashboard is a few tens of thousands
+UNDO_KEPT = 10
+DEFAULT_PATH = "lovelace"  # how the agent names the default dashboard, which Home Assistant keys as None
+
+BUILT_IN_CARDS = frozenset(
+    {
+        "alarm-panel", "area", "button", "calendar", "clock", "conditional", "entities", "entity", "entity-filter",
+        "gauge", "glance", "grid", "heading", "history-graph", "horizontal-stack", "humidifier", "iframe", "light",
+        "logbook", "map", "markdown", "media-control", "picture", "picture-elements", "picture-entity",
+        "picture-glance", "plant-status", "sensor", "shopping-list", "statistic", "statistics-graph", "thermostat",
+        "tile", "todo-list", "vertical-stack", "weather-forecast",
+    }
+)
+VIEW_TYPES = frozenset({"masonry", "sidebar", "panel", "sections"})
+
+
+def _cards(node: Any) -> list[dict[str, Any]]:
+    """Every card in a view, a section or a stack, nested ones included."""
+    found: list[dict[str, Any]] = []
+    if not isinstance(node, dict):
+        return found
+    for key in ("cards", "sections"):
+        for child in node.get(key) or []:
+            if isinstance(child, dict):
+                if key == "cards":
+                    found.append(child)
+                found += _cards(child)
+    if isinstance(node.get("card"), dict):  # conditional, entity-filter
+        found.append(node["card"])
+        found += _cards(node["card"])
+    return found
+
+
+def _entity_ids(node: Any) -> set[str]:
+    """Every entity id a config names, wherever it names it."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in ("entity", "entity_id", "camera_image") and isinstance(value, str) and "." in value:
+                found.add(value)
+            elif key in ("entities", "entity_id") and isinstance(value, list):
+                found |= {v for v in value if isinstance(v, str) and "." in v}
+                found |= _entity_ids([v for v in value if isinstance(v, dict)])
+            else:
+                found |= _entity_ids(value)
+    elif isinstance(node, list):
+        for value in node:
+            found |= _entity_ids(value)
+    return found
+
+
+def _resource_urls(hass: HomeAssistant) -> list[str]:
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    resources = getattr(hass.data.get(LOVELACE_DATA), "resources", None)
+    try:
+        return [str(item.get("url", "")) for item in resources.async_items()] if resources else []
+    except Exception:  # noqa: BLE001 (resources not loaded yet)
+        return []
+
+
+def _custom_registered(card_type: str, urls: list[str]) -> bool:
+    """A custom card counts as installed when a dashboard resource's file is named after it, the way
+    HACS and hand installs both name them (custom:mushroom-light-card comes from mushroom.js)."""
+    name = card_type.removeprefix("custom:").lower()
+    for url in urls:
+        stem = url.split("?")[0].rsplit("/", 1)[-1].removesuffix(".js").lower()
+        if stem and (name == stem or name.startswith(stem.rstrip("-") + "-") or stem.startswith(name)):
+            return True
+    return False
+
+
+def check(hass: HomeAssistant, config: Any) -> dict[str, Any]:
+    """The dry run: what's wrong with this config (problems stop a save), what's worth a look
+    (warnings), and what it shows. Saves nothing."""
+    problems: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(config, dict) or not isinstance(config.get("views"), list) or not config["views"]:
+        return {"ok": False, "problems": ["The config needs a views list with at least one view."], "warnings": []}
+    if len(json.dumps(config)) > CONFIG_MAX:
+        problems.append(f"The config is over {CONFIG_MAX} characters. Split it into more dashboards.")
+    cards: list[dict[str, Any]] = []
+    for n, view in enumerate(config["views"], 1):
+        if not isinstance(view, dict):
+            problems.append(f"View {n} isn't an object.")
+            continue
+        if view.get("type") and view["type"] not in VIEW_TYPES:
+            warnings.append(f"View {n} has type {view['type']}, which isn't one of {', '.join(sorted(VIEW_TYPES))}.")
+        cards += _cards(view)
+    urls = _resource_urls(hass)
+    types: set[str] = set()
+    for card in cards:
+        card_type = card.get("type")
+        if not isinstance(card_type, str) or not card_type:
+            problems.append("A card has no type.")
+            continue
+        types.add(card_type)
+        if card_type.startswith("custom:"):
+            if not _custom_registered(card_type, urls):
+                problems.append(f"{card_type} isn't installed here (no dashboard resource for it), so it would show an error.")
+        elif card_type not in BUILT_IN_CARDS and not card_type.startswith("energy-"):
+            warnings.append(f"{card_type} isn't a card type this check knows. If it's new in Home Assistant it may be fine.")
+        if card_type == "map":
+            for eid in _entity_ids({"entities": card.get("entities") or []}):
+                state = hass.states.get(eid)
+                if state and "latitude" not in state.attributes and not eid.startswith("zone."):
+                    warnings.append(f"{eid} has no location right now, so it won't show on the map.")
+    entities = sorted(_entity_ids(config))
+    unknown = [eid for eid in entities if hass.states.get(eid) is None]
+    if unknown:
+        problems.append(f"These aren't things in this house: {', '.join(unknown)}.")
+    return {
+        "ok": not problems,
+        "problems": problems,
+        "warnings": warnings,
+        "views": len(config["views"]),
+        "cards": len(cards),
+        "card_types": sorted(types),
+        "entities": entities,
+    }
+
+
+def _key(path: str) -> str | None:
+    return None if path == DEFAULT_PATH else path
+
+
+def all_dashboards(hass: HomeAssistant, data) -> list[dict[str, Any]]:
+    """Every dashboard in the house: its title, address, whether it can be written, and who made it."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    lovelace = hass.data[LOVELACE_DATA]
+    made_here = data.data.get("made") or {}
+    out = []
+    for key, board in lovelace.dashboards.items():
+        path = key or DEFAULT_PATH
+        info = getattr(board, "config", None) or {}
+        out.append(
+            {
+                "title": info.get("title") or ("Overview" if key is None else path),
+                "url": f"/{path}",
+                "mode": getattr(board, "mode", "storage"),
+                "made_by_console": path in made_here or path == URL_PATH,
+            }
+        )
+    return out
+
+
+def _find(hass: HomeAssistant, url: str, title: str) -> str | None:
+    """The dashboard's path from its address, or else its title. None when there's no such dashboard."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    lovelace = hass.data[LOVELACE_DATA]
+    if url.strip():
+        path = url.strip().strip("/") or DEFAULT_PATH
+        return path if _key(path) in lovelace.dashboards else None
+    wanted = title.strip().lower()
+    for key, board in lovelace.dashboards.items():
+        if ((getattr(board, "config", None) or {}).get("title") or "").lower() == wanted:
+            return key or DEFAULT_PATH
+    return _slug(title) if _slug(title) in lovelace.dashboards else None
+
+
+async def _load(board) -> dict[str, Any] | None:
+    try:
+        return await board.async_load(False)
+    except Exception:  # noqa: BLE001 (a storage dashboard nobody has saved yet)
+        return None
+
+
+async def get(hass: HomeAssistant, data, url: str, title: str) -> dict[str, Any]:
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    path = _find(hass, url, title)
+    if path is None:
+        names = ", ".join(f"{d['title']} ({d['url']})" for d in all_dashboards(hass, data))
+        raise Refused(f"There's no dashboard {url or title}. The dashboards are: {names}.")
+    board = hass.data[LOVELACE_DATA].dashboards[_key(path)]
+    config = await _load(board)
+    return {
+        "url": f"/{path}",
+        "mode": getattr(board, "mode", "storage"),
+        "config": config,
+        "note": "Home Assistant fills this dashboard itself until it's first saved." if config is None else "",
+    }
+
+
+async def save(hass: HomeAssistant, data, url: str, title: str, config: Any) -> dict[str, Any]:
+    """Write a whole dashboard config: a new dashboard by title, or an existing one by url or title.
+    Refused when the check finds problems. Keeps what was there for `undo`."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    report = check(hass, config)
+    if not report["ok"]:
+        raise Refused("Nothing was saved. " + " ".join(report["problems"]))
+    lovelace = hass.data[LOVELACE_DATA]
+    path = _find(hass, url, title)
+    created = False
+    if path is None:
+        if url.strip():
+            raise Refused(f"There's no dashboard at {url}. To make a new one, give a title instead.")
+        title = title.strip()
+        if not title or len(title) > 40:
+            raise Refused("Give the new dashboard a name of up to 40 characters.")
+        path = _slug(title)
+        await _collection(hass).async_create_item(
+            {"url_path": path, "title": title, "icon": "mdi:view-dashboard", "show_in_sidebar": True, "require_admin": False, "mode": "storage"}
+        )
+        data.data.setdefault("made", {})[path] = {"title": title, "rooms": [], "entity_ids": [], "written": True}
+        created = True
+    board = lovelace.dashboards[_key(path)]
+    if getattr(board, "mode", "storage") != "storage":
+        raise Refused(f"/{path} is kept in a YAML file, which Console doesn't edit. Change it in that file, or make a new dashboard.")
+    before = None if created else await _load(board)
+    await board.async_save(config)
+    if path == URL_PATH:  # a written Home dashboard counts as edited by hand: the rebuild leaves it alone
+        data.data.setdefault("dashboard", {})["written"] = None
+    change_id = f"dash-{secrets.token_hex(4)}"
+    undo = data.data.setdefault("dashboard_undo", [])
+    undo.append({"change_id": change_id, "path": path, "created": created, "before": before, "at": dt_util.utcnow().isoformat()})
+    del undo[:-UNDO_KEPT]
+    data.changed()
+    return {
+        "ok": True,
+        "url": f"/{path}",
+        "created": created,
+        "change_id": change_id,
+        "cards": report["cards"],
+        "warnings": report["warnings"],
+        "undo": "op=undo with this change_id puts back what was there",
+    }
+
+
+async def undo(hass: HomeAssistant, data, change_id: str) -> dict[str, Any]:
+    """Put a dashboard back as it was before one save: the old config, or no dashboard if the save made it."""
+    from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: PLC0415
+
+    kept = data.data.get("dashboard_undo") or []
+    entry = next((e for e in kept if e["change_id"] == change_id), None)
+    if entry is None:
+        ids = ", ".join(e["change_id"] for e in kept) or "none"
+        raise Refused(f"There's no dashboard change {change_id} to undo. The ones kept: {ids}.")
+    later = [e for e in kept[kept.index(entry) + 1 :] if e["path"] == entry["path"]]
+    if later:
+        raise Refused(f"/{entry['path']} was changed again since ({later[-1]['change_id']}). Undo that first.")
+    path = entry["path"]
+    lovelace = hass.data[LOVELACE_DATA]
+    if entry["created"]:
+        collection = _collection(hass)
+        for item in list(collection.async_items()):
+            if item.get("url_path") == path:
+                await collection.async_delete_item(item["id"])
+        (data.data.get("made") or {}).pop(path, None)
+        did = "removed the dashboard that change made"
+    elif _key(path) not in lovelace.dashboards:
+        raise Refused(f"/{path} doesn't exist any more, so there's nothing to put back.")
+    elif entry["before"] is None:
+        await lovelace.dashboards[_key(path)].async_delete()
+        did = "back to Home Assistant's automatic dashboard"
+    else:
+        await lovelace.dashboards[_key(path)].async_save(entry["before"])
+        did = "put back the dashboard as it was"
+    kept.remove(entry)
+    data.changed()
+    return {"ok": True, "url": f"/{path}", "did": did}

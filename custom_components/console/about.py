@@ -55,7 +55,7 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
             "answer questions about the house",
             "search and play music, playlists and radio on a room's speaker; queue, move, pause, skip, volume",
             "make and change routines, rename things and rooms, add devices Home Assistant found",
-            "make and remove dashboards",
+            "make, change and remove dashboards, including maps, graphs and conditional cards (undoable)",
             "diagnose unreachable devices and the network, and undo its own changes",
             "run Sunrise's skills (list_skills), including welcome for first-time setup",
         ],
