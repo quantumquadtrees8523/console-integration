@@ -36,6 +36,23 @@ Until then the card says the cloud agent isn't connected, and plain commands sti
 If the cloud agent can't be used (the month's allowance is spent, the relay has been out of reach for
 longer than a key lasts, or the model fails) the person is told so, and step 1 keeps working.
 
+## Suggested routines
+
+An administrator can turn on **Nightly suggestions** on the Console page, under Settings. It's off unless
+someone turns it on, because each night's run uses some of the month's credits.
+
+- Each night (3:17 at the house's time) Console's cloud agent follows Sunrise's `routines` skill to suggest
+  up to 3 routines from how the house is used. Sunrise saves each one as a real automation, **switched
+  off** and labelled **Suggested**, so it can't fire on its own. It never suggests anything with a lock,
+  alarm, garage door, heating or sound, or anything not exposed to Assist.
+- The suggestions show in the chat card. A tap runs one once and reads back what changed. On the **fifth
+  tap** it's kept: an ordinary automation that runs on its own trigger, which Sunrise's `undo` can still take back.
+- A suggestion nobody taps for 7 days is removed, and so is one an administrator removes (✕). Either way
+  it's never suggested again.
+- The run is skipped when the cloud agent can't be used or 80% of the month's allowance is used.
+  **Suggest now** on the Console page runs it at once.
+- Needs Sunrise 0.3.0 or newer (its `routine` tool's `suggest`, `keep` and `dismiss`).
+
 ## What leaves the house
 
 - To the model provider (OpenRouter): the conversation, the tool list and tool results, for requests

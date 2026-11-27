@@ -95,7 +95,7 @@ async def test_erasing_data_forgets_everything_and_cuts_the_link_to_the_relay(ha
 
     answer = await ws(hass, hass_ws_client, {"type": "console/wipe", "level": "data", "confirm": "Erase my data "})
     assert answer["success"] is True, answer
-    assert answer["result"]["erased"] == {"console_store": True, "learned_sentences": 1, "chat_messages": 2, "sunrise_data": True}
+    assert answer["result"]["erased"] == {"console_store": True, "learned_sentences": 1, "chat_messages": 2, "sunrise_data": True, "suggestions": 0}
     assert not sunrise.exists()
     assert console.key() is None and console.data["learned"] == [] and console.summary()["turns"] == 0
     assert console.history.total() == 0

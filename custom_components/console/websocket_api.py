@@ -13,7 +13,7 @@ import probatio as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import backups, dashboard, knows, wipe, wording
+from . import backups, dashboard, knows, suggestions, wipe, wording
 from .const import DOMAIN
 from .status import status
 
@@ -41,6 +41,11 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_chat,
         ws_chat_history,
         ws_chat_clear,
+        ws_suggestions,
+        ws_suggestions_set,
+        ws_suggestions_run,
+        ws_suggestion_tap,
+        ws_suggestion_dismiss,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -283,3 +288,60 @@ def ws_chat_history(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 def ws_chat_clear(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """Delete this person's chat history from the box."""
     connection.send_result(msg["id"], {"deleted": hass.data[DOMAIN].history.clear(connection.user.id)})
+
+
+# --- suggested routines (suggestions.py) ----------------------------------------------------------
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions"})
+@callback
+def ws_suggestions(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The suggested routines waiting in the chat card, the setting, and the last night's run."""
+    data = hass.data[DOMAIN]
+    answer = data.suggestions.listing()
+    if data.cloud_state() in ("ai_off", "cloud_off") or not answer["available"]:
+        answer["items"] = []  # nothing to tap: the tools behind them are off or missing
+    connection.send_result(msg["id"], answer | {"cost_note": wording.SUGGESTIONS_COST, "is_admin": connection.user.is_admin})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/set", vol.Required("on"): bool})
+@websocket_api.require_admin
+@callback
+def ws_suggestions_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    connection.send_result(msg["id"], hass.data[DOMAIN].suggestions.set_on(msg["on"]))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/run"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_suggestions_run(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Run tonight's suggestions now (an administrator asked, so it runs even with the setting off)."""
+    try:
+        connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.run(force=True))
+    except suggestions.Refused as error:
+        connection.send_error(msg["id"], "refused", str(error))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/tap", vol.Required("suggestion_id"): str})
+@websocket_api.async_response
+async def ws_suggestion_tap(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Run a suggestion once, as the person who tapped it. The fifth tap keeps it."""
+    data = hass.data[DOMAIN]
+    try:
+        done = await data.suggestions.tap(msg["suggestion_id"], connection.user.id)
+    except suggestions.Refused as error:
+        connection.send_error(msg["id"], "refused", str(error))
+        return
+    data.history.add(connection.user.id, "you", wording.suggestion_tapped(done["name"]))
+    data.history.add(connection.user.id, "console", done["reply"])
+    connection.send_result(msg["id"], done)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/dismiss", vol.Required("suggestion_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_suggestion_dismiss(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    try:
+        connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.dismiss(msg["suggestion_id"], connection.user.id))
+    except suggestions.Refused as error:
+        connection.send_error(msg["id"], "refused", str(error))

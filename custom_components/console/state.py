@@ -63,6 +63,7 @@ def _fresh() -> dict[str, Any]:
         "switches": {"cloud": True, "ai": True},  # the off switches (cloud access, AI): on unless the household turns one off
         "site": None,  # the relay's address for this household, as the relay last gave it
         "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
+        "suggestions": {"on": False, "items": [], "never": [], "kept": [], "last_run": None, "counts": {}},  # suggestions.py
     }
 
 

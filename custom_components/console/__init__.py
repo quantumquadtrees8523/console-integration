@@ -23,6 +23,7 @@ from .history import ChatHistory
 from .learned import Learned
 from .others import OtherAgents
 from .state import ConsoleData
+from .suggestions import Suggestions
 from .support import Support
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data.others = OtherAgents(hass, data)
     data.support = Support(hass, data)
     data.guard = AiGuard(hass, data)
+    data.suggestions = Suggestions(hass, data)
     data.history = ChatHistory(hass)
     await data.history.async_load()
     hass.data[DOMAIN] = data
@@ -79,6 +81,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data.others.start()
     data.support.start()
     data.guard.start()
+    data.suggestions.start()
 
     async def build_dashboard(_event=None) -> None:
         """Once the house's things are all loaded: make the Home dashboard, or bring it up to date."""
@@ -108,6 +111,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data.others.stop()
         data.support.stop()
         data.guard.stop()
+        data.suggestions.stop()
         hass.services.async_remove(DOMAIN, "rebuild_dashboard")
         frontend.async_remove_panel(hass, PANEL_URL)
         await hass.data[DOMAIN].async_save_now()

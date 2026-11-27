@@ -57,6 +57,11 @@ const STYLE = `
   .step .d { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; user-select: text; -webkit-user-select: text; }
   .step.think .d { font-style: italic; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .suggested { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .suggested .label { font-size: 12px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .06em; }
+  .sugg { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sugg .why { font-size: 12px; color: var(--secondary-text-color); flex-basis: 100%; padding-left: 4px; }
+  .sugg .x { border: 0; background: none; color: var(--secondary-text-color); cursor: pointer; font-size: 14px; padding: 4px; }
   .chip { border: 1px solid var(--divider-color); border-radius: 16px; padding: 6px 12px; font-size: 13px; background: none; color: var(--primary-text-color); cursor: pointer; font-family: inherit; }
   form { display: flex; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--divider-color); align-items: flex-end; }
   textarea { flex: 1; min-width: 0; min-height: 42px; max-height: 140px; padding: 10px 14px; border-radius: 21px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: 15px; line-height: 20px; resize: none; box-sizing: border-box; }
@@ -160,6 +165,7 @@ class ConsoleChatCard extends HTMLElement {
       const status = await this._hass.callWS({ type: "console/status" });
       this._welcome = status.onboarding || {};
     } catch (e) { this._welcome = {}; }
+    try { this._suggested = await this._hass.callWS({ type: "console/suggestions" }); } catch (e) { this._suggested = null; }
     try {
       const page = await this._hass.callWS({ type: "console/chat/history", limit: PAGE });
       this._more = page.total > 0;
@@ -252,6 +258,52 @@ class ConsoleChatCard extends HTMLElement {
       chips.appendChild(chip);
     }
     this._hello.appendChild(chips);
+    this._drawSuggested();
+  }
+
+  // Suggested routines: each runs once per tap; the fifth tap keeps it (suggestions.py).
+  _drawSuggested() {
+    const got = this._suggested;
+    if (!got || !(got.items || []).length) return;
+    const box = el("div", "suggested");
+    box.appendChild(el("div", "label", "Suggested routines"));
+    for (const item of got.items) {
+      const row = el("div", "sugg");
+      const chip = el("button", "chip", `\u25B6 ${item.name}  ${item.taps}/${item.keep_after}`);
+      chip.type = "button";
+      chip.title = "Run it once. After " + item.keep_after + " runs it runs by itself.";
+      chip.addEventListener("click", () => this._tap(item));
+      row.appendChild(chip);
+      if (got.is_admin) {
+        const x = el("button", "x", "\u2715"); x.type = "button"; x.title = "Don't suggest this"; x.setAttribute("aria-label", `Don't suggest ${item.name}`);
+        x.addEventListener("click", () => this._dismiss(item));
+        row.appendChild(x);
+      }
+      if (item.description) row.appendChild(el("div", "why", item.description));
+      box.appendChild(row);
+    }
+    this._hello.appendChild(box);
+  }
+
+  async _tap(item) {
+    if (this._busy) return;
+    this._busy = true;
+    this._hello.remove();
+    this._log.appendChild(this._turn("me", `Run \u201c${item.name}\u201d`).node);
+    try {
+      const done = await this._hass.callWS({ type: "console/suggestions/tap", suggestion_id: item.id });
+      this._log.appendChild(this._turn("it", done.reply).node);
+    } catch (e) { this._log.appendChild(this._turn("it", String(e.message || e), { error: true }).node); }
+    this._busy = false;
+    this._log.scrollTop = this._log.scrollHeight;
+    try { this._suggested = await this._hass.callWS({ type: "console/suggestions" }); } catch (e) { /* keep what's shown */ }
+    this._drawTop();
+  }
+
+  async _dismiss(item) {
+    try { await this._hass.callWS({ type: "console/suggestions/dismiss", suggestion_id: item.id }); } catch (e) { /* it's gone already */ }
+    try { this._suggested = await this._hass.callWS({ type: "console/suggestions" }); } catch (e) { this._suggested = null; }
+    this._drawHello();
   }
 
   _newChat() {
