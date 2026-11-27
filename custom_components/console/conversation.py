@@ -27,7 +27,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.json import json_dumps
 
-from . import openrouter, router, tools, wording
+from . import openrouter, router, tools, topics, wording
 from .const import (
     AGENT_NAME,
     DOMAIN,
@@ -320,7 +320,9 @@ class ConsoleAgent(conversation.ConversationEntity):
         except HandedOff as handed:
             del chat_log.content[keep:]
             trail.step("Handed to Claude Code", "This needs something the chat's tools can't do.")
-            return self._say(user_input, chat_log, handed.reply, turn.route, "other", True, trail, turn)
+            return self._say(
+                user_input, chat_log, handed.reply, turn.route, "other", True, trail, turn, topic="handoff.other"
+            )
         except openrouter.LimitReached:
             self.data.limit_reached()
             del chat_log.content[keep:]
@@ -342,7 +344,8 @@ class ConsoleAgent(conversation.ConversationEntity):
             self.data.others.mark_own(began, time.time())
 
         category = turn.label or router.category_for_tools(turn.calls)
-        self.data.count_turn(turn.route, category, True)
+        topic = topics.for_turn(self._with_kinds(turn.calls), category)
+        self.data.count_turn(turn.route, category, True, topic=topic)
         trail.meta(route=turn.route, cost_usd=turn.cost_usd, model_calls=turn.model_calls)
         _LOGGER.debug(
             "Console turn: route=%s category=%s model_calls=%s cost=%.5f ms=%d",
@@ -373,6 +376,9 @@ class ConsoleAgent(conversation.ConversationEntity):
 
         def note(result) -> bool:
             matched["intent"] = result.intent.name
+            kind = (getattr(result, "entities", None) or {}).get("domain")
+            if kind is not None and isinstance(getattr(kind, "value", None), str):
+                matched["domain"] = kind.value  # "light", from "the lights": a kind of thing, never a name
             return False  # never filter: this only records what matched
 
         try:
@@ -381,11 +387,14 @@ class ConsoleAgent(conversation.ConversationEntity):
                 response = intent.IntentResponse(language=user_input.language)
                 response.async_set_speech(said)
                 category = "control"
+                topic = "learned.run"
             else:
                 response = await conversation.async_handle_intents(
                     self.hass, user_input, chat_log, intent_filter=note
                 )
                 category = router.category_for_intent(matched.get("intent"))
+                kinds = [state.domain for state in getattr(response, "matched_states", None) or []]
+                topic = topics.for_intent(matched.get("intent"), kinds or matched.get("domain"))
         except Exception:  # noqa: BLE001 (whatever the local agent trips on, the cloud agent gets the turn)
             _LOGGER.exception("Console: the local agent failed")
             return None
@@ -400,7 +409,7 @@ class ConsoleAgent(conversation.ConversationEntity):
             conversation.AssistantContent(agent_id=user_input.agent_id, content=speech)
         )
         ok = response.response_type is not intent.IntentResponseType.ERROR
-        self.data.count_turn(ROUTE_LOCAL, category, ok)
+        self.data.count_turn(ROUTE_LOCAL, category, ok, topic=topic)
         trail.step(
             "Answered at home",
             "A sentence this house learned: no AI, no internet."
@@ -409,6 +418,20 @@ class ConsoleAgent(conversation.ConversationEntity):
         )
         trail.meta(route=ROUTE_LOCAL, cost_usd=0.0, model_calls=0)
         return conversation.ConversationResult(response=response, conversation_id=chat_log.conversation_id)
+
+    def _with_kinds(self, calls: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
+        """The same calls, with the kind of thing ("light") filled in where an intent tool was given only
+        a name: the label is by kind, and the name goes no further than this lookup."""
+        out = []
+        for name, args in calls:
+            named = args.get("name")
+            if name.rsplit("__", 1)[-1].startswith("Hass") and not args.get("domain") and isinstance(named, str):
+                wanted = named.casefold()
+                kind = next((s.domain for s in self.hass.states.async_all() if s.name.casefold() == wanted), None)
+                if kind:
+                    args = args | {"domain": kind}
+            out.append((name, args))
+        return out
 
     def _say(
         self,
@@ -420,13 +443,14 @@ class ConsoleAgent(conversation.ConversationEntity):
         ok: bool,
         trail: Trail | None = None,
         turn: Turn | None = None,
+        topic: str = topics.NOTHING,
     ) -> conversation.ConversationResult:
         chat_log.async_add_assistant_content_without_tools(
             conversation.AssistantContent(agent_id=user_input.agent_id, content=words)
         )
         response = intent.IntentResponse(language=user_input.language)
         response.async_set_speech(words)
-        self.data.count_turn(route, category, ok)
+        self.data.count_turn(route, category, ok, topic=topic)
         if trail is not None and turn is not None:
             trail.meta(route=route, cost_usd=turn.cost_usd, model_calls=turn.model_calls)
         return conversation.ConversationResult(response=response, conversation_id=chat_log.conversation_id)

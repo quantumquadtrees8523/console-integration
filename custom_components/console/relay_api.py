@@ -2,7 +2,9 @@
 
 - POST /api/console/relay/config: hand over the household's inference key, plan and spend. The answer
   carries this month's usage summary, so one round trip does both.
-- GET  /api/console/relay/status: versions, the cloud agent's state and the usage summary.
+- GET  /api/console/relay/status: versions, the cloud agent's state and the usage summary, and the
+  batch of topic counts waiting to go (labels from a fixed list; the relay adds them to one total for
+  all houses and tells this box in the next handover that it can forget the batch).
 - POST /api/console/relay/notify: show the household a notification.
 
 The usage summary is counts and labels only (see state.ConsoleData.summary). No message, device name or
@@ -80,7 +82,11 @@ class StatusView(HomeAssistantView):
         if not _admin(request):
             return self.json_message("Administrators only.", 403)
         hass: HomeAssistant = request.app["hass"]
-        return self.json(_report(hass, hass.data[DOMAIN]) | {"detail": status(hass, hass.data[DOMAIN])})
+        data: ConsoleData = hass.data[DOMAIN]
+        report = _report(hass, data) | {"detail": status(hass, data)}
+        if batch := data.topics_batch():
+            report["topics"] = batch
+        return self.json(report)
 
 
 class NotifyView(HomeAssistantView):

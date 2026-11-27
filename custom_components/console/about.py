@@ -69,6 +69,8 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
         "what_is_kept": (
             "Chat history is kept on this box only, per signed-in person, and is listed and deletable on the "
             "Console page under What the house knows about you. Monthly totals (counts by kind and route, and "
-            "credits used) go to Console's relay; no message does."
+            "credits used) go to Console's relay, and so do counts of what kind of thing each request was, as "
+            "labels from a fixed list such as lights.on_off, which the relay adds to one total for all houses "
+            "and does not keep for this house; no message, device name or room does."
         ),
     }
