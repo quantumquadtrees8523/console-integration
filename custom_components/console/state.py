@@ -74,6 +74,7 @@ def _fresh() -> dict[str, Any]:
         # sent, kept unchanged until the relay says it was counted.
         "topics": {"pending": {}, "sending": None},
         "suggestions": {"on": False, "items": [], "never": [], "kept": [], "last_run": None, "counts": {}},  # suggestions.py
+        "style": {"on": True, "last_run": None},  # style.py
     }
 
 

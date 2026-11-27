@@ -42,7 +42,7 @@ const STYLE = `
   .sw.free { background: none; border: 1.5px solid var(--divider-color); box-sizing: border-box; }
 `;
 
-const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Weekly suggestions", automations: "Automations and scripts",
+const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Weekly suggestions", style: "Weekly reply style", automations: "Automations and scripts",
   suggestion_taps: "Taps on suggested routines", claude: "Claude and other agents", support: "While support mode was on" };
 const PATH_NOTES = { suggestion_taps: "they run at home", claude: "on your own Claude plan", support: "Console's operator, or anyone's Claude while it was on" };
 const credits = (n) => `${n} credit${Number(n) === 1 ? "" : "s"}`;
@@ -92,7 +92,7 @@ class ConsolePanel extends HTMLElement {
     if (!got) return "";
     const dark = !!(this._hass.themes && this._hass.themes.darkMode);
     const colors = dark ? ["#338ced", "#e76624", "#00a888", "#d28e05", "#e24d8b"] : ["#257de0", "#f47230", "#00b894", "#f2a600", "#ee7fac"];
-    const paid = ["chat", "voice", "assist", "suggestions", "automations"];
+    const paid = ["chat", "voice", "assist", "suggestions", "style", "automations"];
     const rows = got.paths;
     const slices = rows.filter((r) => paid.includes(r.path)).map((r) => ({ ...r, color: colors[paid.indexOf(r.path)] }));
     const total = slices.reduce((sum, r) => sum + r.spend_usd, 0);
