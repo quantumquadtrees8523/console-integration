@@ -7,6 +7,7 @@ Home dashboard is (dashboard.py): from the things the owner exposed, lights firs
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import probatio as vol
@@ -27,7 +28,9 @@ PROMPT = (
     "unclear, then play the result's uri. `dashboard` makes a dashboard for rooms or things the person names "
     "(op=create), lists the ones made this way (op=list) and removes one (op=remove). `about` returns "
     "Console's own facts (versions, the plan and credits, the off switches, what this chat can and can't do): "
-    "call it before answering a question about Console itself."
+    "call it before answering a question about Console itself. `chat_history` reads the person's own "
+    "earlier messages in Console's chat (theirs only, read-only): use it for the match-my-style skill or "
+    "when they ask about something they said before."
 )
 
 
@@ -134,6 +137,54 @@ class DashboardTool(llm.Tool):
         return llm.ToolResult(data=result, error=False)
 
 
+HISTORY_MAX = 200
+
+
+class ChatHistoryTool(llm.Tool):
+    """The asking person's own chat with Console, read-only. The same messages the chat card already
+    gives the model as earlier context; never another person's, and nothing for a turn with no one
+    signed in (a pipeline, an automation)."""
+
+    integration = DOMAIN
+    name = "chat_history"
+    title = "Read my chat with Console"
+    description = (
+        "The signed-in person's own earlier messages in Console's chat and Console's replies, oldest first: "
+        "each with when, who (you or console) and the text. Only theirs, never another household member's. "
+        "limit is how many of the newest messages (at most 200); days keeps only the last N days."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Optional("limit", description="how many of the newest messages, at most 200"): vol.Coerce(int),
+            vol.Optional("days", description="only messages from the last N days"): vol.Coerce(int),
+        }
+    )
+    annotations = llm.ToolAnnotations(read_only=True, destructive=False, idempotent=True, open_world=False)
+
+    async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> llm.ToolResult:
+        args = dict(tool_input.tool_args or {})
+        user_id = llm_context.context.user_id if llm_context.context else None
+        if not user_id:
+            return llm.ToolResult(data={"error": "Only a signed-in person's own chat can be read, and nobody is signed in to this turn."}, error=False)
+        limit = max(1, min(int(args.get("limit") or HISTORY_MAX), HISTORY_MAX))
+        messages = hass.data[DOMAIN].history.last(user_id, limit)
+        if args.get("days"):
+            since = datetime.now(UTC) - timedelta(days=max(1, int(args["days"])))
+            messages = [m for m in messages if _when(m.get("at")) >= since]
+        out = [{"at": m.get("at"), "who": m.get("who"), "text": m.get("text")} for m in messages]
+        return llm.ToolResult(
+            data={"messages": out, "count": len(out), "yours": sum(1 for m in out if m["who"] == "you")}, error=False
+        )
+
+
+def _when(at: Any) -> datetime:
+    try:
+        when = datetime.fromisoformat(str(at))
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+
 async def _admin(hass: HomeAssistant, llm_context: llm.LLMContext) -> bool:
     """A signed-in person must be an administrator; Home Assistant's own pipelines (no user) may not
     change dashboards at all."""
@@ -147,4 +198,4 @@ class ConsoleAPI(llm.API):
         super().__init__(hass=hass, id=API_ID, name=NAME)
 
     async def async_get_api_instance(self, llm_context: llm.LLMContext) -> llm.APIInstance:
-        return llm.APIInstance(api=self, api_prompt=PROMPT, llm_context=llm_context, tools=[MusicTool(), DashboardTool(), AboutTool()])
+        return llm.APIInstance(api=self, api_prompt=PROMPT, llm_context=llm_context, tools=[MusicTool(), DashboardTool(), AboutTool(), ChatHistoryTool()])

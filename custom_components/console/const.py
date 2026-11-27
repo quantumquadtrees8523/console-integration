@@ -2,7 +2,7 @@
 
 DOMAIN = "console"
 NAME = "Console"
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 
 AGENT_NAME = "Console"
 
@@ -32,11 +32,12 @@ PATH_CHAT = "chat"  # the chat card
 PATH_VOICE = "voice"  # a voice speaker or satellite
 PATH_ASSIST = "assist"  # Assist in Home Assistant's own app or the Companion app, someone signed in
 PATH_SUGGESTIONS = "suggestions"  # the weekly suggested-routines run
+PATH_STYLE = "style"  # the weekly reply-style run (style.py)
 PATH_AUTOMATIONS = "automations"  # an automation or script asking the agent (conversation.process)
 PATH_TAPS = "suggestion_taps"  # a tap on a suggested routine: runs at home, no AI
 PATH_CLAUDE = "claude"  # Claude and other agents, through the MCP server
 PATH_SUPPORT = "support"  # other agents' requests while support mode was on
-PATHS = (PATH_CHAT, PATH_VOICE, PATH_ASSIST, PATH_SUGGESTIONS, PATH_AUTOMATIONS, PATH_TAPS, PATH_CLAUDE, PATH_SUPPORT)
+PATHS = (PATH_CHAT, PATH_VOICE, PATH_ASSIST, PATH_SUGGESTIONS, PATH_STYLE, PATH_AUTOMATIONS, PATH_TAPS, PATH_CLAUDE, PATH_SUPPORT)
 
 # What each turn is counted as. Only these labels and their counts ever leave the box.
 CATEGORIES = ("control", "status", "customization", "setup", "troubleshooting", "other")
