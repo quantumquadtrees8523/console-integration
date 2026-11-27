@@ -8,6 +8,10 @@ Console is the opinionated way to run a home on [Home Assistant](https://www.hom
   household's cloud agent with Sunrise's tools.
 - **A chat card** for your dashboards (`custom:console-chat-card`).
 - **A Console page** in the sidebar: your plan, this month's usage, and exactly what is sent out.
+- **Music Assistant** in the sidebar, for admins, when Home Assistant has a Music Assistant: its own app
+  (music sources, speakers, library), relayed by Home Assistant so it opens at home and through the relay,
+  and signed in with your Home Assistant login. The first time, sign in to Music Assistant once there and
+  press **Use my Home Assistant login**.
 - **The link to Console's relay**, which hands this house its own short-lived model key and reads back
   monthly totals. No message is ever sent to the relay; the chat card's history stays on the box.
 

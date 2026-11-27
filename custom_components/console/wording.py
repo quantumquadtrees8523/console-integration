@@ -176,3 +176,24 @@ def usage_out(reset: datetime) -> str:
         f"Console's cloud agent is paused until {day}. Your house still works at home. "
         "[See where the credits went](/console)."
     )
+
+
+# --- Music Assistant in the sidebar (music_app.py, www/console-music-panel.js) ---------------------
+
+MUSIC_PANEL_TITLE = "Music Assistant"
+MUSIC_PANEL_WORDS = {
+    "opening": "Opening Music Assistant…",
+    "down": "Music Assistant isn't answering right now.",
+    "failed": "Couldn't open Music Assistant:",
+    "retry": "Try again",
+    "link": "Music Assistant still has its own password. Sign in below once, then use your Home Assistant login from now on.",
+    "link_button": "Use my Home Assistant login",
+    "linking": "Connecting…",
+    "sign_in_first": "Sign in to Music Assistant below first, then press this again.",
+}
+MUSIC_ADMINS_ONLY = "Only admins can open Music Assistant."
+MUSIC_OPEN_FROM_SIDEBAR = "Open Music Assistant from Home Assistant's sidebar."
+MUSIC_NOT_ANSWERING = "Music Assistant isn't answering."
+MUSIC_NO_SETUP = "Music Assistant didn't start its Home Assistant setup."
+MUSIC_SETUP_REFUSED = "Music Assistant didn't accept Home Assistant."
+MUSIC_LOGIN_OFF = "Music Assistant connected to Home Assistant, but its Home Assistant login didn't turn on."
