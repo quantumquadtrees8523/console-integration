@@ -5,6 +5,7 @@ Home Assistant's other stores. Nothing here is a message: counts and labels only
 from __future__ import annotations
 
 from collections.abc import Callable
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -63,6 +64,9 @@ def _fresh() -> dict[str, Any]:
         "switches": {"cloud": True, "ai": True},  # the off switches (cloud access, AI): on unless the household turns one off
         "site": None,  # the relay's address for this household, as the relay last gave it
         "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
+        # What kind of thing each request was (topics.py), by month, not yet sent; and the batch being
+        # sent, kept unchanged until the relay says it was counted.
+        "topics": {"pending": {}, "sending": None},
         "suggestions": {"on": False, "items": [], "never": [], "kept": [], "last_run": None, "counts": {}},  # suggestions.py
     }
 
@@ -198,7 +202,12 @@ class ConsoleData:
         self.changed()
 
     @callback
-    def count_turn(self, route: str, category: str, ok: bool, agent: str = "console") -> None:
+    def count_turn(
+        self, route: str, category: str, ok: bool, agent: str = "console", topic: str | None = None
+    ) -> None:
+        if topic:
+            waiting = self._topics()["pending"].setdefault(self.period, {})
+            waiting[topic] = waiting.get(topic, 0) + 1
         month = self.month()
         month["turns"] += 1
         month["ok" if ok else "failed"] += 1
@@ -223,6 +232,45 @@ class ConsoleData:
             "by_agent": dict(month["by_agent"]),
         }
 
+    # --- topics: what kind of thing each request was ------------------------------------------------
+
+    def _topics(self) -> dict[str, Any]:
+        kept = self.data.get("topics")
+        if not isinstance(kept, dict) or "pending" not in kept:
+            kept = self.data["topics"] = {"pending": {}, "sending": None}
+        return kept
+
+    @callback
+    def topics_batch(self) -> dict[str, Any] | None:
+        """The batch of topic counts to send to the relay, or None. A batch is frozen the first time it
+        is asked for: it goes out unchanged until the relay says it was counted (topics_counted), so
+        nothing is counted twice or lost. Requests made meanwhile wait for the next batch."""
+        kept = self._topics()
+        if kept.get("sending") is None and any(kept["pending"].values()):
+            kept["sending"] = {"batch": uuid.uuid4().hex, "counts": kept["pending"]}
+            kept["pending"] = {}
+            self.changed()
+        return kept.get("sending")
+
+    @callback
+    def topics_counted(self, batch: str) -> None:
+        kept = self._topics()
+        if kept.get("sending") and kept["sending"].get("batch") == batch:
+            kept["sending"] = None
+            self.changed()
+
+    def topics_waiting(self) -> dict[str, dict[str, int]]:
+        """Every topic count on this box that the relay hasn't confirmed, by month: what the household
+        is shown on the Console page."""
+        kept = self._topics()
+        out: dict[str, dict[str, int]] = {}
+        for counts in (kept["pending"], (kept.get("sending") or {}).get("counts") or {}):
+            for period, topics in counts.items():
+                month = out.setdefault(period, {})
+                for topic, n in topics.items():
+                    month[topic] = month.get(topic, 0) + n
+        return out
+
     # --- what the relay hands over ----------------------------------------------------------------
 
     @callback
@@ -235,6 +283,8 @@ class ConsoleData:
             self.data["relay_spend"] = config["spend"]
         if isinstance(config.get("site"), str) and config["site"].startswith("https://"):
             self.data["site"] = config["site"].rstrip("/")
+        if isinstance(config.get("topics_applied"), str):
+            self.topics_counted(config["topics_applied"])
         # The relay knows what OpenRouter has counted: it says whether the month's allowance is spent.
         self.data["limit_hit"] = self.period if config.get("over") else None
         self.data["linked_at"] = self.now().isoformat()

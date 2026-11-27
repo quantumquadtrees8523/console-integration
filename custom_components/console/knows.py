@@ -71,6 +71,7 @@ async def everything(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
             for item in data.data["learned"]
         ],
         "usage": data.summary(),
+        "topics": data.topics_waiting(),
         "chat_messages": data.history.total(),
     }
 

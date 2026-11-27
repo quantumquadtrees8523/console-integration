@@ -10,7 +10,7 @@ import time
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
-from . import router
+from . import router, topics
 from .const import ROUTE_OTHER
 
 GAP_S = 90
@@ -71,7 +71,14 @@ class OtherAgents:
             if now - group[-1]["ts"] <= GAP_S:
                 break  # this turn may still be going
             del self._open[: len(group)]
-            category = router.category_for_tools([(c.get("tool", ""), c.get("args") or {}) for c in group])
-            self.data.count_turn(ROUTE_OTHER, category, not any(c.get("error") for c in group), agent=AGENT)
+            calls = [(c.get("tool", ""), c.get("args") or {}) for c in group]
+            category = router.category_for_tools(calls)
+            self.data.count_turn(
+                ROUTE_OTHER,
+                category,
+                not any(c.get("error") for c in group),
+                agent=AGENT,
+                topic=topics.for_turn(calls, category),
+            )
             counted += 1
         return counted

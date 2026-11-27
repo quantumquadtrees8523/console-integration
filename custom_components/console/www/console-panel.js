@@ -141,9 +141,12 @@ class ConsolePanel extends HTMLElement {
         ${admin ? `<div class="row"><button class="act" data-do="assist-clear" ${k.assist_runs ? "" : "disabled"}>Clear them now</button></div>` : ""}</section>
       <section><h2>Learned sentences</h2>
         <p class="soft">Phrasings this household says often, taught to Home Assistant's own agent so they run at home without the cloud.</p>${learned}</section>
-      <section><h2>The monthly summary that is sent out</h2>
-        <p class="soft">Once in a while Console sends this month's totals to Console's relay, and nothing else: no messages, no device names, no rooms, no times of day. This is exactly what is sent (<code>spend_usd</code> is in dollars: 0.12 there is 12 credits):</p>
+      <section><h2>What is sent out</h2>
+        <p class="soft">Once in a while Console sends two things to Console's relay, and nothing else: no messages, no device names, no rooms, no times of day.</p>
+        <p class="soft"><b>1. This month's totals for this house.</b> This is exactly what is sent (<code>spend_usd</code> is in dollars: 0.12 there is 12 credits):</p>
         <pre>${esc(JSON.stringify(k.usage, null, 2))}</pre>
+        <p class="soft"><b>2. What kind of thing each request was</b>, as a label from a fixed list, such as <code>lights.on_off</code> or <code>automations.create</code>. Console works the label out from what was done, not from your words. The relay adds these counts to one total for all houses together and does not keep them for this house. These are the counts on this box waiting to be sent:</p>
+        <pre>${esc(JSON.stringify(k.topics || {}, null, 2))}</pre>
         <p class="soft">To erase these counts along with everything else Console keeps, use Settings → Erase Console and Sunrise data.</p></section>
       <p class="soft">${esc(this._said)}</p>`;
   }
