@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
 from . import router, topics
-from .const import ROUTE_OTHER
+from .const import PATH_CLAUDE, PATH_SUPPORT, ROUTE_OTHER
 
 GAP_S = 90
 AGENT = "other_agents"
@@ -79,6 +79,7 @@ class OtherAgents:
                 not any(c.get("error") for c in group),
                 agent=AGENT,
                 topic=topics.for_turn(calls, category),
+                path=PATH_SUPPORT if self.data.support.on() else PATH_CLAUDE,
             )
             counted += 1
         return counted

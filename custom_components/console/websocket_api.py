@@ -14,7 +14,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from . import backups, dashboard, knows, suggestions, wipe, wording
-from .const import DOMAIN
+from .const import DOMAIN, PATH_CHAT
 from .status import status
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_suggestions_run,
         ws_suggestion_tap,
         ws_suggestion_dismiss,
+        ws_usage_paths,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -244,8 +245,10 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     data.history.add(user_id, "you", text)
     started = time.monotonic()
     try:
+        context = connection.context(msg)
+        data.via[context.id] = PATH_CHAT
         result = await conversation.async_converse(
-            hass, text, conversation_id, connection.context(msg), hass.config.language, agent_id="conversation.console"
+            hass, text, conversation_id, context, hass.config.language, agent_id="conversation.console"
         )
         speech = (result.response.speech.get("plain") or {}).get("speech") or ""
         failed = result.response.response_type.value == "error"
@@ -257,6 +260,8 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     finally:
         data.streams.pop(conversation_id, None)
         data.earlier.pop(conversation_id, None)
+        if "context" in locals():
+            data.via.pop(context.id, None)
     data.history.add(user_id, "console", speech, **({"failed": True} if failed else {}))
     send(
         {
@@ -345,3 +350,18 @@ async def ws_suggestion_dismiss(hass: HomeAssistant, connection: websocket_api.A
         connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.dismiss(msg["suggestion_id"], connection.user.id))
     except suggestions.Refused as error:
         connection.send_error(msg["id"], "refused", str(error))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/usage/paths"})
+@callback
+def ws_usage_paths(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """This month's requests and credits by where they came from: the Plan tab's "Where it went".
+    Kept on the box; not part of the summary sent to the relay."""
+    from .const import PATHS  # noqa: PLC0415
+    from .credits import credits  # noqa: PLC0415
+
+    data = hass.data[DOMAIN]
+    got = data.paths()
+    rows = [{"path": p, "turns": got.get(p, {}).get("turns", 0), "spend_usd": round(got.get(p, {}).get("spend_usd", 0.0), 6),
+             "credits": credits(got.get(p, {}).get("spend_usd", 0.0))} for p in PATHS]
+    connection.send_result(msg["id"], {"period": data.period, "paths": rows, "credits_used": credits(data.spend_usd)})

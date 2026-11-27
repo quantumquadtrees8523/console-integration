@@ -1,4 +1,4 @@
-"""Suggested routines: once a night, Console's cloud agent looks at how the house is used and tees up a
+"""Suggested routines: once a week (Mondays at 3 AM), Console's cloud agent looks at how the house is used and tees up a
 few routines in the chat card. Each one is a real Home Assistant automation that Sunrise saved switched
 off and labelled "Suggested" (Sunrise's `routine` op=suggest), so it can't fire on its own.
 
@@ -8,8 +8,10 @@ off and labelled "Suggested" (Sunrise's `routine` op=suggest), so it can't fire 
 - No tap for EXPIRE_DAYS days, or a tap on ✕: it is removed (op=dismiss) and never suggested again.
 - At most MAX_LIVE suggestions exist at a time.
 
-The nightly run is a setting, off unless an administrator turns it on, because each run spends some of
-the month's allowance. It is skipped when the cloud agent can't be used or the allowance is nearly spent.
+The weekly run is a setting, off unless an administrator turns it on, because each run spends some of
+the month's allowance; what it spent shows on the Plan tab under "Where it went". It isn't throttled: it
+runs whenever the cloud agent can be used, and is skipped only when it can't (switched off, unlinked, or
+the month's allowance used up).
 Console keeps, per suggestion: its automation id and name, a fingerprint of what it does, when it was
 made, and the taps. Nothing a person said. Only counts leave the box.
 """
@@ -27,21 +29,21 @@ from homeassistant.helpers import llm
 from homeassistant.helpers.event import async_track_time_change
 
 from . import wording
-from .const import DOMAIN, LLM_API_SUNRISE
+from .const import DOMAIN, LLM_API_SUNRISE, PATH_SUGGESTIONS, PATH_TAPS
 
 _LOGGER = logging.getLogger(__name__)
 
 MAX_LIVE = 3
 KEEP_AFTER = 5
 EXPIRE_DAYS = 7
-RUN_AT = (3, 17)  # local time, when the house is quiet
+RUN_AT = (0, 3, 0)  # Monday (weekday 0), 3:00 local time, when the house is quiet
 NEVER_KEPT = 200
 
 RUN_PROMPT = (
     "Suggest up to {n} routines for this house from how it is used. Follow the routines skill (get_skill name=routines), "
     "its section “Suggesting routines”, exactly: read memory, list the routines, read usage, then save each one "
     "with routine op=suggest. Never act, try or keep anything now: nobody is here, and nothing in the house may change "
-    "tonight. Don't suggest these again, the household didn't want them: {never}. Already suggested: {live}. If nothing "
+    "now. Don't suggest these again, the household didn't want them: {never}. Already suggested: {live}. If nothing "
     "has enough evidence, suggest nothing. Reply with one line: how many you suggested."
 )
 
@@ -76,7 +78,7 @@ class Suggestions:
 
     @callback
     def start(self) -> None:
-        self._stop = async_track_time_change(self.hass, self._nightly, hour=RUN_AT[0], minute=RUN_AT[1], second=0)
+        self._stop = async_track_time_change(self.hass, self._weekly, hour=RUN_AT[1], minute=RUN_AT[2], second=0)
 
     @callback
     def stop(self) -> None:
@@ -84,11 +86,13 @@ class Suggestions:
             self._stop()
             self._stop = None
 
-    async def _nightly(self, _now: datetime) -> None:
+    async def _weekly(self, now: datetime) -> None:
+        if now.weekday() != RUN_AT[0]:
+            return
         try:
             await self.run()
-        except Exception:  # noqa: BLE001 (a failed night mustn't stop the next one)
-            _LOGGER.exception("Console: the nightly suggestions run failed")
+        except Exception:  # noqa: BLE001 (a failed week mustn't stop the next one)
+            _LOGGER.exception("Console: the weekly suggestions run failed")
 
     # --- the setting ------------------------------------------------------------------------------
 
@@ -109,7 +113,7 @@ class Suggestions:
     # --- talking to Sunrise -----------------------------------------------------------------------
 
     async def _routine(self, args: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
-        """Sunrise's routine tool, as the person who tapped (or as nobody, for the nightly run)."""
+        """Sunrise's routine tool, as the person who tapped (or as nobody, for the weekly run)."""
         ctx = llm.LLMContext(
             platform=DOMAIN, context=Context(user_id=user_id), language=self.hass.config.language,
             assistant="conversation", device_id=None,
@@ -141,7 +145,7 @@ class Suggestions:
         month = self.state["counts"].setdefault(self.data.period, {})
         month[what] = month.get(what, 0) + 1
 
-    # --- the nightly run --------------------------------------------------------------------------
+    # --- the weekly run --------------------------------------------------------------------------
 
     async def run(self, *, force: bool = False) -> dict[str, Any]:
         """Tidy up, then ask the cloud agent for new suggestions up to MAX_LIVE."""
@@ -151,7 +155,7 @@ class Suggestions:
         if self.running:
             return {"ran": False, "why": "already running"}
         cloud = self.data.cloud_state()
-        if cloud != "ok":
+        if cloud not in ("ok", "near_limit"):
             return self._ran(False, f"cloud agent {cloud}")
         self.running = True
         try:
@@ -168,7 +172,12 @@ class Suggestions:
                 never=", ".join(f"“{n['name']}”" for n in state["never"][-30:]) or "none",
                 live=", ".join(f"“{i['name']}”" for i in state["items"]) or "none",
             )
-            await conversation.async_converse(self.hass, text, None, Context(), self.hass.config.language, agent_id="conversation.console")
+            context = Context()
+            self.data.via[context.id] = PATH_SUGGESTIONS
+            try:
+                await conversation.async_converse(self.hass, text, None, context, self.hass.config.language, agent_id="conversation.console")
+            finally:
+                self.data.via.pop(context.id, None)
             made = await self.reconcile()
             return self._ran(True, None, made=made, cost=round(self.data.spend_usd - before, 6))
         finally:
@@ -251,6 +260,7 @@ class Suggestions:
         item["taps"] = int(item.get("taps") or 0) + 1
         item["last_tap"] = self.data.now().isoformat()
         self._count("tapped")
+        self.data.count_path(PATH_TAPS)
         things = tried.get("things") or []
         kept = None
         if item["taps"] >= KEEP_AFTER:

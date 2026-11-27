@@ -122,15 +122,14 @@ def handoff(args: dict[str, Any]) -> str:
 
 # --- suggested routines --------------------------------------------------------------------------
 
-SUGGESTIONS_ON_TITLE = "Nightly suggestions are on"
+SUGGESTIONS_ON_TITLE = "Weekly suggestions are on"
 SUGGESTIONS_ON = (
-    "Each night Console's cloud agent looks at how your house is used and suggests a few routines in the chat. "
-    "This uses some of this month's credits every night, so your allowance runs down faster. Turn it off any "
-    "time on the Console page, under Settings."
+    "Every Monday at 3 AM Console's cloud agent looks at how your house is used and suggests a few routines in "
+    "the chat. Each run uses some of this month's credits: see what it used on the [Console page](/console), "
+    "under Where it went. Turn it off any time under Settings."
 )
 SUGGESTIONS_COST = (
-    "Each night's run uses some of this month's credits, so the allowance runs down faster. It's skipped once "
-    "80% of the month's allowance is used, and whenever the cloud agent is off."
+    "Each Monday's run uses some of this month's credits. The Plan tab shows what it used, under Where it went."
 )
 SUGGESTIONS_NO_SUNRISE = "Suggested routines need Sunrise, and it isn't installed."
 SUGGESTION_GONE = "That suggestion isn't here any more."
@@ -159,3 +158,21 @@ def suggestion_tapped(name: str) -> str:
 
 def suggestion_dismissed(name: str) -> str:
     return f"Removed “{name}”. I won't suggest it again."
+
+
+# --- usage notifications (alerts.py) --------------------------------------------------------------
+
+USAGE_TITLE_NEAR = "80% of this month's Console credits used"
+USAGE_TITLE_OUT = "This month's Console credits are used up"
+
+
+def usage_near(percent: int) -> str:
+    return f"You've used {percent}% of this month's Console credits. [See where they went](/console)."
+
+
+def usage_out(reset: datetime) -> str:
+    day = f"{reset.strftime('%B')} {reset.day}"
+    return (
+        f"Console's cloud agent is paused until {day}. Your house still works at home. "
+        "[See where the credits went](/console)."
+    )

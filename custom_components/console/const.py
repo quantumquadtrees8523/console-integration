@@ -2,7 +2,7 @@
 
 DOMAIN = "console"
 NAME = "Console"
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 AGENT_NAME = "Console"
 
@@ -26,6 +26,17 @@ ROUTE_PRO = "pro"  # Pro, after a failure or a hard case
 ROUTE_FALLBACK = "fallback"  # the cloud agent couldn't be used; the person was told so
 ROUTE_OTHER = "other_agent"  # another agent (Claude, through the MCP server) did it with Sunrise's tools
 ROUTES = (ROUTE_LOCAL, ROUTE_FAST, ROUTE_FULL, ROUTE_PRO, ROUTE_FALLBACK, ROUTE_OTHER)
+
+# Where a request came from (the Plan tab's "Where it went"). Kept on the box only.
+PATH_CHAT = "chat"  # the chat card
+PATH_VOICE = "voice"  # a voice speaker or satellite
+PATH_ASSIST = "assist"  # Assist in Home Assistant's own app or the Companion app, someone signed in
+PATH_SUGGESTIONS = "suggestions"  # the weekly suggested-routines run
+PATH_AUTOMATIONS = "automations"  # an automation or script asking the agent (conversation.process)
+PATH_TAPS = "suggestion_taps"  # a tap on a suggested routine: runs at home, no AI
+PATH_CLAUDE = "claude"  # Claude and other agents, through the MCP server
+PATH_SUPPORT = "support"  # other agents' requests while support mode was on
+PATHS = (PATH_CHAT, PATH_VOICE, PATH_ASSIST, PATH_SUGGESTIONS, PATH_AUTOMATIONS, PATH_TAPS, PATH_CLAUDE, PATH_SUPPORT)
 
 # What each turn is counted as. Only these labels and their counts ever leave the box.
 CATEGORIES = ("control", "status", "customization", "setup", "troubleshooting", "other")

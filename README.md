@@ -38,10 +38,10 @@ longer than a key lasts, or the model fails) the person is told so, and step 1 k
 
 ## Suggested routines
 
-An administrator can turn on **Nightly suggestions** on the Console page, under Settings. It's off unless
-someone turns it on, because each night's run uses some of the month's credits.
+An administrator can turn on **Weekly suggestions** on the Console page, under Settings. It's off unless
+someone turns it on, because each run uses some of the month's credits (the Plan tab shows how many).
 
-- Each night (3:17 at the house's time) Console's cloud agent follows Sunrise's `routines` skill to suggest
+- Every Monday at 3 AM (the house's time) Console's cloud agent follows Sunrise's `routines` skill to suggest
   up to 3 routines from how the house is used. Sunrise saves each one as a real automation, **switched
   off** and labelled **Suggested**, so it can't fire on its own. It never suggests anything with a lock,
   alarm, garage door, heating or sound, or anything not exposed to Assist.
@@ -49,9 +49,20 @@ someone turns it on, because each night's run uses some of the month's credits.
   tap** it's kept: an ordinary automation that runs on its own trigger, which Sunrise's `undo` can still take back.
 - A suggestion nobody taps for 7 days is removed, and so is one an administrator removes (✕). Either way
   it's never suggested again.
-- The run is skipped when the cloud agent can't be used or 80% of the month's allowance is used.
-  **Suggest now** on the Console page runs it at once.
+- It isn't throttled: it runs whenever the cloud agent can be used, and is skipped only when it can't
+  (switched off, unlinked, or the month's allowance used up). **Suggest now** on the Console page runs it at once.
 - Needs Sunrise 0.3.0 or newer (its `routine` tool's `suggest`, `keep` and `dismiss`).
+
+## Where the credits went
+
+The Console page's Plan tab has **Where it went**: a pie of this month's credits by where the requests
+came from (the chat card, voice, Assist in the app, weekly suggestions, automations and scripts), with
+a legend that also lists what spends no credits (taps on suggested routines, Claude and other agents,
+requests while support mode was on). It's kept on the box and isn't part of the summary that is sent out.
+
+At 80% and at 100% of the month's credits, Home Assistant shows a notification, and each phone with the
+Companion app gets a push. Each says how much is used and links to the Plan tab. Nothing is throttled;
+at 100% the cloud agent pauses until the 1st, as before, and the house keeps working at home.
 
 ## What leaves the house
 
