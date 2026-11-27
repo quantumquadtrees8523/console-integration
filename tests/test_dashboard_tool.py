@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from homeassistant.components.homeassistant.exposed_entities import async_expose_entity
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.core import Context
@@ -82,3 +86,107 @@ async def test_the_tool_never_removes_a_dashboard_it_did_not_make(hass, console)
     except dashboard.Refused as error:
         assert "didn't make a dashboard called Home" in str(error)
     assert "console-home" in hass.data[LOVELACE_DATA].dashboards
+
+
+def family(hass):
+    hass.states.async_set("person.sam", "home", {"friendly_name": "Sam", "latitude": 40.7, "longitude": -74.0})
+    hass.states.async_set("device_tracker.sams_phone", "home", {"friendly_name": "Sam's phone", "latitude": 40.7, "longitude": -74.0})
+    hass.states.async_set("device_tracker.old_tablet", "unknown", {"friendly_name": "Old tablet"})
+    hass.states.async_set("sensor.living_temp", "21.5", {"friendly_name": "Living room temperature", "unit_of_measurement": "°C"})
+
+
+WHERE = {
+    "views": [
+        {
+            "type": "sections",
+            "title": "Where everyone is",
+            "sections": [
+                {
+                    "type": "grid",
+                    "cards": [
+                        {"type": "map", "entities": ["person.sam", {"entity": "device_tracker.sams_phone"}], "hours_to_show": 24},
+                        {"type": "history-graph", "entities": ["sensor.living_temp"], "hours_to_show": 48},
+                        {
+                            "type": "conditional",
+                            "conditions": [{"condition": "state", "entity": "person.sam", "state_not": "home"}],
+                            "card": {"type": "markdown", "content": "Sam is out."},
+                        },
+                    ],
+                }
+            ],
+        }
+    ]
+}
+
+
+async def test_the_chat_writes_a_map_dashboard_itself_and_can_undo_it(hass, console, model, hass_admin_user):
+    link(console)
+    family(hass)
+    context = Context(user_id=hass_admin_user.id)
+
+    model.call_tool("console__dashboard", {"op": "save", "title": "Where everyone is", "config": WHERE})
+    model.say("Done: a map of where everyone is, in the sidebar. [[customization]]")
+    await ask(hass, "make me a dashboard with a map of where everyone is", context)
+    board = hass.data[LOVELACE_DATA].dashboards["console-where-everyone-is"]
+    assert await board.async_load(False) == WHERE
+    result = json.loads(model.calls[1]["messages"][-1]["content"])["data"]
+    assert result["created"] is True and result["cards"] == 4 and result["warnings"] == []
+
+    model.call_tool("console__dashboard", {"op": "undo", "change_id": result["change_id"]})
+    model.say("Taken away again. [[customization]]")
+    await ask(hass, "undo that", context)
+    assert "console-where-everyone-is" not in hass.data[LOVELACE_DATA].dashboards
+    assert "console-where-everyone-is" not in console.data["made"]
+
+
+async def test_an_edit_to_the_home_dashboard_sticks_and_undo_puts_it_back(hass, console):
+    from custom_components.console import dashboard
+
+    await dashboard.ensure(hass, console)
+    got = await dashboard.get(hass, console, "/console-home", "")
+    original = got["config"]
+    edited = json.loads(json.dumps(original))
+    edited["views"][0]["sections"].append({"type": "grid", "cards": [{"type": "markdown", "content": "Hello"}]})
+
+    saved = await dashboard.save(hass, console, "/console-home", "", edited)
+    assert saved["created"] is False
+    board = hass.data[LOVELACE_DATA].dashboards["console-home"]
+    assert await board.async_load(False) == edited
+    assert (await dashboard.ensure(hass, console))["did"] == "left alone: it has been edited by hand"
+
+    await dashboard.undo(hass, console, saved["change_id"])
+    assert await board.async_load(False) == original
+    with pytest.raises(dashboard.Refused, match="no dashboard change"):
+        await dashboard.undo(hass, console, saved["change_id"])
+
+
+async def test_a_config_with_problems_is_refused_and_nothing_is_saved(hass, console):
+    from custom_components.console import dashboard
+
+    family(hass)
+    bad = {"views": [{"cards": [{"type": "map", "entities": ["person.nobody", "device_tracker.old_tablet"]}, {"type": "custom:fancy-card"}]}]}
+    report = dashboard.check(hass, bad)
+    assert report["ok"] is False
+    assert any("person.nobody" in p for p in report["problems"])
+    assert any("custom:fancy-card isn't installed" in p for p in report["problems"])
+    assert any("old_tablet has no location" in w for w in report["warnings"])
+    with pytest.raises(dashboard.Refused, match="Nothing was saved"):
+        await dashboard.save(hass, console, "", "Broken", bad)
+    assert "console-broken" not in hass.data[LOVELACE_DATA].dashboards
+    assert dashboard.check(hass, {"views": []})["ok"] is False
+
+
+async def test_an_installed_custom_card_passes_the_check(hass, console):
+    from custom_components.console import dashboard
+
+    await dashboard.ensure_resource(hass, "/hacsfiles/mushroom/mushroom.js?v=4")
+    config = {"views": [{"cards": [{"type": "custom:mushroom-light-card", "entity": "light.kitchen"}]}]}
+    assert dashboard.check(hass, config)["ok"] is True
+
+
+async def test_only_an_administrators_agent_reads_a_dashboards_config(hass, console, model):
+    link(console)
+    model.call_tool("console__dashboard", {"op": "get", "url": "/console-home"})
+    model.say("I can't. [[customization]]")
+    await ask(hass, "show me the home dashboard's config")
+    assert "administrator" in model.calls[1]["messages"][-1]["content"]

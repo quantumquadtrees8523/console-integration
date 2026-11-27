@@ -1,8 +1,8 @@
 """Console's own tools for AI agents, beside Sunrise's: one LLM API ("console").
 
-`dashboard` makes, lists and removes dashboards. Home Assistant has no action for that, so without this
-tool an agent can't do "add a dashboard for the kids' room". The dashboard is built the same way the
-Home dashboard is (dashboard.py): from the things the owner exposed, lights first, no guessing.
+`dashboard` makes, changes and removes dashboards. Home Assistant has no action for that, so without this
+tool an agent can't do "add a dashboard for the kids' room". op=create builds one the same way the Home
+dashboard is (dashboard.py); op=get/check/save let the agent write the whole config itself, every save undoable.
 """
 
 from __future__ import annotations
@@ -25,8 +25,9 @@ PROMPT = (
     "services, read their playlists and library, play by name or uri on a room's speaker, show the queue, "
     "move it to another room, pause, skip, seek and set volume. For a request like \"play X by Y in the kitchen "
     "at 60\", call it once with op=play, what, artist, room and volume; search first only when the name is "
-    "unclear, then play the result's uri. `dashboard` makes a dashboard for rooms or things the person names "
-    "(op=create), lists the ones made this way (op=list) and removes one (op=remove). `about` returns "
+    "unclear, then play the result's uri. `dashboard` makes a quick dashboard for rooms or things the person names "
+    "(op=create), and for anything richer (a map of where people and devices are, graphs, conditional cards) "
+    "reads, dry-runs and writes a whole dashboard config (op=get, check, save; op=undo puts it back). `about` returns "
     "Console's own facts (versions, the plan and credits, the off switches, what this chat can and can't do): "
     "call it before answering a question about Console itself. `chat_history` reads the person's own "
     "earlier messages in Console's chat (theirs only, read-only): use it for the match-my-style skill or "
@@ -102,36 +103,55 @@ class AboutTool(llm.Tool):
 class DashboardTool(llm.Tool):
     integration = DOMAIN
     name = "dashboard"
-    title = "Make or remove a dashboard"
+    title = "Make, change or remove a dashboard"
     description = (
-        "Make a Home Assistant dashboard for some rooms or things, list the dashboards made this way, or remove "
-        "one. op=create needs a title and rooms (room names) and/or entity_ids; it shows only things the owner "
-        "exposed to Assist. Creating again with the same title rebuilds that dashboard. op=remove needs the title."
+        "Home Assistant dashboards. op=list: every dashboard (title, url, mode). Quick layout: op=create needs a "
+        "title and rooms and/or entity_ids and builds tiles for the things exposed to Assist; op=remove takes a "
+        "title Console made. Anything richer (map, history-graph, statistics-graph, gauge, conditional, stacks, "
+        "markdown, sections, badges, installed custom: cards): op=get reads a dashboard's full Lovelace config by "
+        "url or title; op=check is the dry run of a config, saving nothing; op=save writes a whole config to the "
+        "dashboard at url, or to a new one named title, and returns change_id; op=undo with change_id puts back "
+        "what that save replaced. Get before you change an existing one, then save the whole edited config. "
+        "Use only entity ids that exist (from house_map); a map needs things with a location (person.*, "
+        "device_tracker.*, zone.*)."
     )
     parameters = vol.Schema(
         {
-            vol.Required("op", description="create, list or remove"): vol.In(["create", "list", "remove"]),
+            vol.Required("op", description="list, create, remove, get, check, save or undo"): vol.In(
+                ["create", "list", "remove", "get", "check", "save", "undo"]
+            ),
             vol.Optional("title", description="the dashboard's name, e.g. Kids' room"): str,
-            vol.Optional("rooms", description="room names whose things go on it"): [str],
-            vol.Optional("entity_ids", description="extra things to show, by entity id"): [str],
+            vol.Optional("url", description="an existing dashboard's address, e.g. /console-home or /lovelace"): str,
+            vol.Optional("rooms", description="room names whose things go on it, for op=create"): [str],
+            vol.Optional("entity_ids", description="extra things to show, by entity id, for op=create"): [str],
+            vol.Optional("config", description="the whole Lovelace config, {views: [...]}, for check and save"): dict,
+            vol.Optional("change_id", description="from op=save, for op=undo"): str,
         }
     )
-    annotations = llm.ToolAnnotations(read_only=False, destructive=True, idempotent=True, open_world=False)
+    annotations = llm.ToolAnnotations(read_only=False, destructive=True, idempotent=False, open_world=False)
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> llm.ToolResult:
         args = dict(tool_input.tool_args or {})
         data = hass.data[DOMAIN]
-        if args.get("op") != "list" and not await _admin(hass, llm_context):
-            return llm.ToolResult(data={"error": "Only a Home Assistant administrator's agent can change dashboards."}, error=False)
+        op = args.get("op")
+        if op != "list" and not await _admin(hass, llm_context):
+            return llm.ToolResult(data={"error": "Only a Home Assistant administrator's agent can read or change dashboards."}, error=False)
+        title, url = str(args.get("title") or ""), str(args.get("url") or "")
         try:
-            if args["op"] == "list":
-                result: dict[str, Any] = {"dashboards": dashboard.made(data)}
-            elif args["op"] == "create":
-                result = await dashboard.make(
-                    hass, data, str(args.get("title") or ""), list(args.get("rooms") or []), list(args.get("entity_ids") or [])
-                )
+            if op == "list":
+                result: dict[str, Any] = {"dashboards": dashboard.all_dashboards(hass, data)}
+            elif op == "create":
+                result = await dashboard.make(hass, data, title, list(args.get("rooms") or []), list(args.get("entity_ids") or []))
+            elif op == "remove":
+                result = await dashboard.unmake(hass, data, title)
+            elif op == "get":
+                result = await dashboard.get(hass, data, url, title)
+            elif op == "check":
+                result = dashboard.check(hass, args.get("config"))
+            elif op == "save":
+                result = await dashboard.save(hass, data, url, title, args.get("config"))
             else:
-                result = await dashboard.unmake(hass, data, str(args.get("title") or ""))
+                result = await dashboard.undo(hass, data, str(args.get("change_id") or ""))
         except dashboard.Refused as error:
             result = {"error": str(error)}
         return llm.ToolResult(data=result, error=False)
