@@ -18,6 +18,7 @@ from homeassistant.helpers import llm
 
 from . import dashboard, relay_api, tools, websocket_api
 from .const import DOMAIN, PANEL_URL, STATIC_URL, VERSION
+from .alerts import UsageAlerts
 from .guard import AiGuard
 from .history import ChatHistory
 from .learned import Learned
@@ -40,6 +41,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data.support = Support(hass, data)
     data.guard = AiGuard(hass, data)
     data.suggestions = Suggestions(hass, data)
+    data.alerts = UsageAlerts(hass, data)
     data.history = ChatHistory(hass)
     await data.history.async_load()
     hass.data[DOMAIN] = data
@@ -82,6 +84,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data.support.start()
     data.guard.start()
     data.suggestions.start()
+    data.alerts.start()
 
     async def build_dashboard(_event=None) -> None:
         """Once the house's things are all loaded: make the Home dashboard, or bring it up to date."""
@@ -112,6 +115,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data.support.stop()
         data.guard.stop()
         data.suggestions.stop()
+        data.alerts.stop()
         hass.services.async_remove(DOMAIN, "rebuild_dashboard")
         frontend.async_remove_panel(hass, PANEL_URL)
         await hass.data[DOMAIN].async_save_now()

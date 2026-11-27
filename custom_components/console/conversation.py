@@ -39,12 +39,15 @@ from .const import (
     MAX_TOOL_ROUNDS_FULL,
     MODEL_FLASH,
     MODEL_PRO,
+    PATH_ASSIST,
+    PATH_AUTOMATIONS,
+    PATH_VOICE,
     ROUTE_FALLBACK,
     ROUTE_FAST,
     ROUTE_LOCAL,
     ROUTE_PRO,
 )
-from .state import ConsoleData
+from .state import PATH, ConsoleData
 from .trail import LabelGate, Trail, tool_step
 
 _LOGGER = logging.getLogger(__name__)
@@ -233,6 +236,20 @@ def confirmed_reply(calls: list[llm.ToolInput], results: list[conversation.ToolR
     return f"Done. {len(rows)} things changed: {names}{' and more' if len(rows) > 6 else ''}."
 
 
+def path_of(data: ConsoleData, user_input: conversation.ConversationInput) -> str:
+    """Where a request came from: the chat card and the suggestions run mark their own requests;
+    otherwise a speaker says which it is, someone signed in is Assist in an app, and a request with
+    neither is an automation or a script."""
+    context = user_input.context
+    if context is not None and (marked := data.via.get(context.id)):
+        return marked
+    if getattr(user_input, "satellite_id", None) or user_input.device_id:
+        return PATH_VOICE
+    if context is not None and context.user_id:
+        return PATH_ASSIST
+    return PATH_AUTOMATIONS
+
+
 class ConsoleAgent(conversation.ConversationEntity):
     """Console's conversation agent."""
 
@@ -251,6 +268,15 @@ class ConsoleAgent(conversation.ConversationEntity):
         return MATCH_ALL
 
     async def _async_handle_message(
+        self, user_input: conversation.ConversationInput, chat_log: conversation.ChatLog
+    ) -> conversation.ConversationResult:
+        token = PATH.set(path_of(self.data, user_input))  # every count and spend in this turn goes to its path
+        try:
+            return await self._handle(user_input, chat_log)
+        finally:
+            PATH.reset(token)
+
+    async def _handle(
         self, user_input: conversation.ConversationInput, chat_log: conversation.ChatLog
     ) -> conversation.ConversationResult:
         started = time.monotonic()

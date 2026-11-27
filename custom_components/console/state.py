@@ -5,6 +5,7 @@ Home Assistant's other stores. Nothing here is a message: counts and labels only
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -22,6 +23,10 @@ from .const import (
     STORAGE_VERSION,
     WARN_AT,
 )
+
+
+# Where the request being answered came from, for the length of one turn (conversation.py sets it).
+PATH: ContextVar[str | None] = ContextVar("console_path", default=None)
 
 
 def period_of(now: datetime) -> str:
@@ -44,6 +49,7 @@ def _empty_month() -> dict[str, Any]:
         "by_route": dict.fromkeys(ROUTES, 0),
         "by_category": dict.fromkeys(CATEGORIES, 0),
         "by_agent": {},
+        "by_path": {},  # path -> {"turns", "spend_usd"}: shown on the Plan tab, not sent to the relay
     }
 
 
@@ -84,6 +90,8 @@ class ConsoleData:
         # messages it has on screen. Held in memory for the length of the turn only.
         self.streams: dict[str, Callable[[dict[str, Any]], None]] = {}
         self.earlier: dict[str, list[dict[str, Any]]] = {}
+        # Requests whose path the caller knows (the chat card, the suggestions run), by context id, for one turn.
+        self.via: dict[str, str] = {}
 
     async def async_load(self) -> None:
         stored = await self._store.async_load()
@@ -192,9 +200,26 @@ class ConsoleData:
         return "ok"
 
     @callback
-    def add_spend(self, usd: float) -> None:
+    def add_spend(self, usd: float, path: str | None = None) -> None:
         self.month()["spend_usd"] = round(float(self.month()["spend_usd"]) + max(usd, 0.0), 6)
+        if path := path or PATH.get():
+            row = self._path_row(path)
+            row["spend_usd"] = round(float(row["spend_usd"]) + max(usd, 0.0), 6)
         self.changed()
+
+    def _path_row(self, path: str) -> dict[str, Any]:
+        return self.month().setdefault("by_path", {}).setdefault(path, {"turns": 0, "spend_usd": 0.0})
+
+    @callback
+    def count_path(self, path: str) -> None:
+        """One request on a path that isn't an agent turn (a tap on a suggested routine)."""
+        self._path_row(path)["turns"] += 1
+        self.changed()
+
+    def paths(self, period: str | None = None) -> dict[str, dict[str, Any]]:
+        """This month's turns and spend by where the requests came from."""
+        month = self.data["months"].get(period or self.period) or {}
+        return {k: dict(v) for k, v in (month.get("by_path") or {}).items()}
 
     @callback
     def limit_reached(self) -> None:
@@ -203,8 +228,11 @@ class ConsoleData:
 
     @callback
     def count_turn(
-        self, route: str, category: str, ok: bool, agent: str = "console", topic: str | None = None
+        self, route: str, category: str, ok: bool, agent: str = "console", topic: str | None = None,
+        path: str | None = None,
     ) -> None:
+        if path := path or PATH.get():
+            self._path_row(path)["turns"] += 1
         if topic:
             waiting = self._topics()["pending"].setdefault(self.period, {})
             waiting[topic] = waiting.get(topic, 0) + 1

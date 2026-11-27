@@ -34,8 +34,17 @@ const STYLE = `
   textarea { min-height: 180px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   a { color: var(--primary-color); }
+  .where { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .where svg { flex: none; }
+  .where .slice:hover { opacity: .85; }
+  .where .legend { flex: 1; min-width: 240px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: baseline; }
+  .sw.free { background: none; border: 1.5px solid var(--divider-color); box-sizing: border-box; }
 `;
 
+const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Weekly suggestions", automations: "Automations and scripts",
+  suggestion_taps: "Taps on suggested routines", claude: "Claude and other agents", support: "While support mode was on" };
+const PATH_NOTES = { suggestion_taps: "they run at home", claude: "on your own Claude plan", support: "Console's operator, or anyone's Claude while it was on" };
 const credits = (n) => `${n} credit${Number(n) === 1 ? "" : "s"}`;
 const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric" }) : "");
@@ -64,6 +73,7 @@ class ConsolePanel extends HTMLElement {
   async _load() {
     try {
       this._status = await this._ws({ type: "console/status" });
+      if (this._tab === "plan") { try { this._paths = await this._ws({ type: "console/usage/paths" }); } catch (e) { this._paths = null; } }
       if (this._tab === "knows") this._knows = await this._ws({ type: "console/knows" });
       if (this._tab === "settings") this._backup = await this._ws({ type: "console/backup/status" });
       if (this._tab === "settings") { try { this._sugg = await this._ws({ type: "console/suggestions" }); } catch (e) { this._sugg = null; } }
@@ -73,6 +83,48 @@ class ConsolePanel extends HTMLElement {
 
   _rows(names, counts) {
     return Object.entries(names).filter(([key]) => (counts || {})[key]).map(([key, name]) => `<tr><td>${name}</td><td>${counts[key]}</td></tr>`).join("") || `<tr><td class="soft">Nothing yet this month.</td><td></td></tr>`;
+  }
+
+  // "Where it went": this month's credits by where the requests came from, as a pie with a legend that
+  // also lists the paths that spend no credits. Colors: categorical slots 1-5, in a fixed order.
+  _whereItWent() {
+    const got = this._paths;
+    if (!got) return "";
+    const dark = !!(this._hass.themes && this._hass.themes.darkMode);
+    const colors = dark ? ["#338ced", "#e76624", "#00a888", "#d28e05", "#e24d8b"] : ["#257de0", "#f47230", "#00b894", "#f2a600", "#ee7fac"];
+    const paid = ["chat", "voice", "assist", "suggestions", "automations"];
+    const rows = got.paths;
+    const slices = rows.filter((r) => paid.includes(r.path)).map((r) => ({ ...r, color: colors[paid.indexOf(r.path)] }));
+    const total = slices.reduce((sum, r) => sum + r.spend_usd, 0);
+    let pie = `<circle cx="80" cy="80" r="72" fill="var(--divider-color)"></circle><text x="80" y="85" text-anchor="middle" font-size="13" fill="var(--secondary-text-color)">No credits yet</text>`;
+    if (total > 0) {
+      let angle = -Math.PI / 2;
+      const shown = slices.filter((r) => r.spend_usd > 0);
+      pie = shown.map((r) => {
+        const share = r.spend_usd / total;
+        const tip = `${PATH_NAMES[r.path]}: ${credits(r.credits)}, ${Math.round(share * 100)}% (${r.turns} request${r.turns === 1 ? "" : "s"})`;
+        if (shown.length === 1) return `<circle cx="80" cy="80" r="72" fill="${r.color}"><title>${esc(tip)}</title></circle>`;
+        const end = angle + share * 2 * Math.PI;
+        const [x1, y1, x2, y2] = [80 + 72 * Math.cos(angle), 80 + 72 * Math.sin(angle), 80 + 72 * Math.cos(end), 80 + 72 * Math.sin(end)];
+        const d = `M80 80 L${x1.toFixed(2)} ${y1.toFixed(2)} A72 72 0 ${share > 0.5 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`;
+        angle = end;
+        return `<path class="slice" d="${d}" fill="${r.color}" stroke="var(--card-background-color)" stroke-width="2" stroke-linejoin="round"><title>${esc(tip)}</title></path>`;
+      }).join("");
+    }
+    const legend = rows.map((r) => {
+      const slot = paid.indexOf(r.path);
+      const swatch = slot >= 0 ? `<span class="sw" style="background:${colors[slot]}"></span>` : `<span class="sw free"></span>`;
+      const share = slot >= 0 && total > 0 ? ` · ${Math.round((r.spend_usd / total) * 100)}%` : "";
+      const right = slot >= 0 ? `${credits(r.credits)}${share}` : "no credits";
+      return `<tr><td>${swatch}${esc(PATH_NAMES[r.path] || r.path)}<div class="soft">${r.turns} request${r.turns === 1 ? "" : "s"}${PATH_NOTES[r.path] ? ` · ${PATH_NOTES[r.path]}` : ""}</div></td><td>${right}</td></tr>`;
+    }).join("");
+    return `<section>
+        <h2>Where it went</h2>
+        <p class="soft">This month's credits by where the requests came from. ${credits(got.credits_used)} used in all.</p>
+        <div class="where"><svg viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Credits by where the requests came from">${pie}</svg>
+        <table class="legend">${legend}</table></div>
+        <p class="soft">Kept on this box. It isn't part of the monthly summary that is sent out.</p>
+      </section>`;
   }
 
   _plan(s) {
@@ -100,6 +152,7 @@ class ConsolePanel extends HTMLElement {
         <p>${STATE_NAMES[s.cloud_agent] || esc(s.cloud_agent)}</p>
         <p class="soft">When the cloud agent is paused or out of reach, your house still works: lights, routines and plain commands run at home, and Claude is unaffected.</p>
       </section>
+      ${this._whereItWent()}
       <section>
         <h2>This month</h2>
         <p class="soft">${usage.turns || 0} requests · ${usage.ok || 0} done · ${usage.failed || 0} not done</p>
@@ -212,10 +265,10 @@ class ConsolePanel extends HTMLElement {
     const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} of ${i.keep_after} runs${admin ? ` <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
     const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">kept ${dayTime(k.at)}</td></tr>`).join("");
     return `<section><h2>Suggested routines</h2>
-        <p><b>Nightly suggestions: ${g.on ? "on" : "off"}</b></p>
-        <p class="soft">Each night Console's cloud agent looks at how the house is used and suggests up to 3 routines in the chat. A suggestion is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it. After 5 taps it's kept and runs by itself. One nobody taps for 7 days is removed, and a removed one is never suggested again.</p>
+        <p><b>Weekly suggestions: ${g.on ? "on" : "off"}</b></p>
+        <p class="soft">Every Monday at 3 AM Console's cloud agent looks at how the house is used and suggests up to 3 routines in the chat. A suggestion is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it. After 5 taps it's kept and runs by itself. One nobody taps for 7 days is removed, and a removed one is never suggested again.</p>
         <div class="note">${esc(g.cost_note)}</div>
-        ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn nightly suggestions off" : "Turn nightly suggestions on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
+        ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn weekly suggestions off" : "Turn weekly suggestions on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
         <p class="soft">${esc(lastLine)}</p>
         ${items ? `<table>${items}</table>` : `<p class="soft">No suggestions waiting.</p>`}
         ${kept ? `<h2 style="margin-top:16px">Kept</h2><table>${kept}</table><p class="soft">A kept routine is an ordinary automation: change or remove it under Settings → Automations, or ask the chat to undo it.</p>` : ""}
@@ -268,7 +321,7 @@ class ConsolePanel extends HTMLElement {
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
       else if (what === "sugg-set") {
-        if (at.on === "1" && !confirm("Turn nightly suggestions on? Each night's run uses some of this month's credits, so the allowance runs down faster.")) return;
+        if (at.on === "1" && !confirm("Turn weekly suggestions on? Each Monday's run uses some of this month's credits. The Plan tab shows what it used.")) return;
         await this._ws({ type: "console/suggestions/set", on: at.on === "1" }); this._suggSaid = "";
       }
       else if (what === "sugg-run") { this._suggSaid = "Looking at the house…"; this._draw(); const r = await this._ws({ type: "console/suggestions/run" }); this._suggSaid = r.ran ? `${r.made} new suggestion${r.made === 1 ? "" : "s"}.` : `Skipped: ${r.why}.`; }

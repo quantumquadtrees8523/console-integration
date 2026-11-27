@@ -118,12 +118,15 @@ async def test_the_run_asks_the_cloud_agent_and_picks_up_what_sunrise_saved(hass
     assert console.suggestions.state["last_run"]["made"] == 1
 
 
-async def test_the_run_is_skipped_near_the_limit_with_ai_off_or_when_full(hass, console, model, monkeypatch):
+async def test_the_run_isnt_throttled_and_is_skipped_only_when_the_cloud_agent_cant_be_used(hass, console, model, monkeypatch):
     fake = _sunrise(hass, monkeypatch)
     link(console, cap=0.05)
     console.suggestions.set_on(True)
-    console.add_spend(0.04)  # 80%
-    assert (await console.suggestions.run())["why"] == "cloud agent near_limit"
+    console.add_spend(0.04)  # 80%: it still runs
+    model.say("Suggested 0. [[customization]]")
+    assert (await console.suggestions.run())["ran"] is True
+    console.add_spend(0.02)  # 100%: the cloud agent is paused, so there's nothing to run it on
+    assert (await console.suggestions.run())["why"] == "cloud agent over_limit"
     link(console, cap=1.0)
     console.set_switch("ai", False)
     assert (await console.suggestions.run())["why"] == "cloud agent ai_off"
@@ -131,7 +134,22 @@ async def test_the_run_is_skipped_near_the_limit_with_ai_off_or_when_full(hass, 
     for n in range(3):
         fake.handle({"op": "suggest", "config": {**CONFIG, "alias": f"Routine {n}", "triggers": [{"trigger": "time", "at": f"2{n}:00:00"}]}}, None)
     assert (await console.suggestions.run())["why"] == "full"
-    assert model.calls == []
+    assert len(model.calls) == 1
+
+
+async def test_it_runs_on_mondays_at_three_only(hass, console, monkeypatch):
+    from datetime import datetime
+
+    ran = []
+
+    async def run(**kw):
+        ran.append(kw)
+        return {}
+
+    monkeypatch.setattr(console.suggestions, "run", run)
+    await console.suggestions._weekly(datetime(2026, 11, 30, 3, 0))  # a Monday
+    await console.suggestions._weekly(datetime(2026, 12, 1, 3, 0))  # a Tuesday
+    assert len(ran) == 1 and S.RUN_AT == (0, 3, 0)
 
 
 async def test_each_tap_runs_it_once_and_the_fifth_keeps_it(hass, console, monkeypatch):
