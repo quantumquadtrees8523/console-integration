@@ -16,7 +16,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall
 from homeassistant.helpers import llm
 
-from . import dashboard, relay_api, tools, websocket_api
+from . import dashboard, music_app, relay_api, tools, websocket_api, wording
 from .const import DOMAIN, PANEL_URL, STATIC_URL, VERSION
 from .alerts import UsageAlerts
 from .guard import AiGuard
@@ -32,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.CONVERSATION, Platform.SENSOR, Platform.SWITCH]
 CARD_URL = f"{STATIC_URL}/console-chat-card.js?v={VERSION}"
 PANEL_JS = f"{STATIC_URL}/console-panel.js?v={VERSION}"
+MUSIC_PANEL_JS = f"{STATIC_URL}/console-music-panel.js?v={VERSION}"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -63,6 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             relay_api.NotifyView,
             relay_api.SupportView,
             relay_api.TokenView,
+            *music_app.VIEWS,
         ):
             hass.http.register_view(view())
         websocket_api.async_setup(hass)
@@ -77,6 +79,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             module_url=PANEL_JS,
             require_admin=False,
             config={},
+        )
+
+    # Music Assistant's own app in the sidebar, for admins, wherever Home Assistant knows a Music Assistant.
+    if music_app.ma_url(hass) and music_app.PANEL_URL not in hass.data.get(frontend.DATA_PANELS, {}):
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=music_app.PANEL_URL,
+            webcomponent_name="console-music-panel",
+            sidebar_title=wording.MUSIC_PANEL_TITLE,
+            sidebar_icon="mdi:music-box-multiple",
+            module_url=MUSIC_PANEL_JS,
+            require_admin=True,
+            config={"title": wording.MUSIC_PANEL_TITLE, "words": wording.MUSIC_PANEL_WORDS},
         )
 
     entry.async_on_unload(llm.async_register_api(hass, tools.ConsoleAPI(hass)))
@@ -122,5 +137,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data.alerts.stop()
         hass.services.async_remove(DOMAIN, "rebuild_dashboard")
         frontend.async_remove_panel(hass, PANEL_URL)
+        if music_app.PANEL_URL in hass.data.get(frontend.DATA_PANELS, {}):
+            frontend.async_remove_panel(hass, music_app.PANEL_URL)
         await hass.data[DOMAIN].async_save_now()
     return unloaded
