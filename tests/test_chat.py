@@ -275,3 +275,12 @@ async def test_the_card_is_not_in_the_pages_start_up_list(hass, console, hass_cl
     client = await hass_client()
     script = await (await client.get("/console_static/console-chat-card.js")).text()
     assert "setTimeout(register" in script and "class extends ConsoleChatCard" in script
+
+
+async def test_the_card_shows_thinking_as_one_line_with_the_rest_a_tap_away(hass, console, hass_client):
+    """Owner, 2026-11-27: the model's whole thinking, streamed, was too noisy. Each thinking step shows its
+    first sentence (at most GIST characters); "Show all" opens the full text."""
+    client = await hass_client()
+    script = await (await client.get("/console_static/console-chat-card.js")).text()
+    assert "const gist = (text)" in script and "thinking.d.textContent = gist(thinking.full)" in script
+    assert '"Show all"' in script and "thinking.d.textContent += event.text" not in script

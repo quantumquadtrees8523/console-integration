@@ -56,6 +56,7 @@ const STYLE = `
   .step.failed .t { color: var(--error-color, #db4437); }
   .step .d { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; user-select: text; -webkit-user-select: text; }
   .step.think .d { font-style: italic; }
+  .step .more { font: inherit; font-size: 11px; margin-left: 8px; padding: 0; border: 0; background: none; color: var(--primary-color); text-decoration: underline; cursor: pointer; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .suggested { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
   .suggested .label { font-size: 12px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .06em; }
@@ -70,6 +71,15 @@ const STYLE = `
   button.send[disabled] { opacity: .5; cursor: default; }
 `;
 
+// The model's thinking, as one line: its first sentence (or what it has so far), at most GIST characters.
+// The whole of it stays one tap away ("Show all"). Owner, 2026-11-27: the full stream was too noisy.
+const GIST = 110;
+const gist = (text) => {
+  const flat = String(text || "").replace(/[*_`#>]+/g, "").replace(/\s+/g, " ").trim();
+  const end = flat.search(/[.!?](\s|$)/);
+  const first = end >= 0 ? flat.slice(0, end + 1) : flat;
+  return first.length > GIST ? `${first.slice(0, GIST - 1).trimEnd()}…` : first;
+};
 const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
 const credits = (usd) => { const c = (usd || 0) * 100; return c >= 10 ? String(Math.round(c)) : c >= 0.1 ? c.toFixed(1) : c.toFixed(2); };
 const copyText = async (text, button) => {
@@ -412,8 +422,16 @@ class ConsoleChatCard extends HTMLElement {
         if (event.title && !done) label.textContent = event.title + (event.state === "running" ? "…" : "");
         thinking = null;
       } else if (event.kind === "thinking") {
-        if (!thinking) { thinking = addStep("think", "Thinking"); if (!done) label.textContent = "Thinking…"; }
-        thinking.d.textContent += event.text;
+        if (!thinking) {
+          const step = addStep("think", "Thinking"), more = el("button", "more", "Show all");
+          step.full = ""; step.open = false; more.type = "button"; more.hidden = true;
+          more.addEventListener("click", () => { step.open = !step.open; more.textContent = step.open ? "Show less" : "Show all"; step.d.textContent = step.open ? step.full : gist(step.full); });
+          step.t.appendChild(more); step.more = more; thinking = step;
+          if (!done) label.textContent = "Thinking…";
+        }
+        thinking.full += event.text;
+        if (!thinking.open) thinking.d.textContent = gist(thinking.full);
+        thinking.more.hidden = gist(thinking.full) === thinking.full.replace(/\s+/g, " ").trim();
       } else if (event.kind === "said") {
         const said = addStep("", "Said"); said.d.textContent = event.text; streamed = ""; repaint(); thinking = null;
       } else if (event.kind === "text") { streamed += event.text; if (!done) label.textContent = "Writing…"; repaint(); thinking = null; }
