@@ -74,7 +74,7 @@ Check, all of these:
 - `sensor.console_cloud_agent` is `not_linked` (it isn't linked yet).
 - `switch.console_cloud_agent` and `switch.console_ai` are both `on`.
 - A dashboard **Home** exists at `/console-home` and is the default.
-- A **Console** page is in the sidebar.
+- **Console settings** is in the sidebar.
 
 ## Step 5: link the house to Console's relay
 
