@@ -499,6 +499,8 @@ class ConsoleAgent(conversation.ConversationEntity):
         response = intent.IntentResponse(language=user_input.language)
         response.async_set_speech(words)
         self.data.count_turn(route, category, ok, topic=topic)
+        if not ok:  # the agent couldn't do it: the chat card shows that conversation as errored
+            self.data.unfinished.add(chat_log.conversation_id)
         if trail is not None and turn is not None:
             trail.meta(route=route, cost_usd=turn.cost_usd, model_calls=turn.model_calls)
         return conversation.ConversationResult(response=response, conversation_id=chat_log.conversation_id)

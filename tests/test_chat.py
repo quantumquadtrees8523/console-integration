@@ -430,6 +430,10 @@ async def test_the_card_keeps_one_turn_one_message_and_shows_conversations_as_co
     assert 'el("div", "replies")' in script and "View earlier conversations" in script and '"Reply"' in script
     assert "Copy all" in script and "Copy conversation" in script
     assert '"console/suggestions/seen"' in script and "_drawSuggested" in script and "_drawQuick" in script
+    # In a drawer (owner, 2026-11-28: "within a drawer though. not completely visible"), several at once, with dots.
+    assert "_openDrawer" in script and '`drawer ${' in script and "_closeDrawer" in script
+    assert '"console/chat/status"' in script and '"console/chat/seen"' in script
+    assert "sdot ${status}" in script and ".sdot.working" in script and ".sdot.error" in script and ".sdot.done" in script
 
 
 async def test_the_feed_is_each_conversation_with_its_newest_replies_and_the_rest_a_tap_away(hass, console, model, hass_ws_client):
@@ -525,3 +529,79 @@ async def test_chat_history_says_which_conversation_each_message_is_in(hass, con
     assert [m["conversation"] for m in got["messages"]] == ["my sister is called Priya"] * 2 + ["the boiler gets serviced every other tuesday"] * 2
     one = (await api.async_call_tool(llm.ToolInput(tool_name="chat_history", tool_args={"thread_id": sister["thread_id"]}))).data
     assert [m["text"] for m in one["messages"]] == ["my sister is called Priya", "Her name is Priya."]
+
+
+async def test_conversations_run_at_once_and_each_has_a_dot_until_it_is_opened(hass, console, model, hass_ws_client):
+    """Owner, 2026-11-28: "i should be able to fire off multiple agents inside multiple chats" and "notification
+    dots that show me if an agent is working, errored, or completed". Two conversations run at the same time;
+    a card listening on console/chat/status hears each start and finish; a finished one keeps its dot (done,
+    or error) until it is opened, on every card."""
+    import asyncio
+
+    link(console)
+    gates = [asyncio.Event(), asyncio.Event()]
+    entered = asyncio.Event()
+    real = model.complete
+    order = []
+
+    async def slow(session, inference, model_id, messages, tools, effort, timeout_s=25, on_delta=None):
+        """Each conversation answers for itself: the garden one replies, the holiday one fails (Flash, then Pro)."""
+        asked = messages[-1]["content"] or ""
+        mine = 0 if "garden" in asked else 1
+        order.append(mine)
+        if len(order) == 2:
+            entered.set()
+        await gates[mine].wait()
+        if mine:
+            raise openrouter.ModelError("http 500")
+        return openrouter.Completion(message={"role": "assistant", "content": "The garden is quiet. [[status]]"}, cost_usd=0.001, model=model_id, thinking="")
+
+    from custom_components.console import openrouter as provider
+
+    provider.complete = slow
+
+    watcher = await hass_ws_client(hass)
+    await watcher.send_json({"id": 1, "type": "console/chat/status"})
+    assert (await watcher.receive_json())["result"]["counts"] == {"working": 0, "done": 0, "error": 0}
+
+    asker = await hass_ws_client(hass)
+    await asker.send_json({"id": 1, "type": "console/chat", "text": "is anything odd going on in the garden tonight"})
+    garden = (await asker.receive_json())["result"]["thread_id"]
+    await asker.send_json({"id": 2, "type": "console/chat", "text": "design a whole week of routines for the holidays"})
+    while (got := await asker.receive_json()).get("id") != 2 or "result" not in got:
+        pass
+    week = got["result"]["thread_id"]
+    await entered.wait()  # both agents are working at once
+    started = [(await watcher.receive_json())["event"] for _ in range(2)]
+    assert [(e["thread_id"], e["status"]) for e in started] == [(garden, "working"), (week, "working")]
+    assert started[-1]["counts"]["working"] == 2
+
+    feed = await hass_ws_client(hass)
+    await feed.send_json({"id": 1, "type": "console/chat/feed"})
+    page = (await feed.receive_json())["result"]
+    assert {t["id"]: t["status"] for t in page["threads"]} == {garden: "working", week: "working"}
+
+    gates[1].set()  # the second one fails (Flash, then Pro)
+    gates[0].set()
+    finished = {}
+    while len(finished) < 2:
+        event = (await watcher.receive_json())["event"]
+        finished[event["thread_id"]] = event["status"]
+    assert finished == {garden: "done", week: "error"}
+    assert event["counts"] == {"working": 0, "done": 1, "error": 1}
+
+    await feed.send_json({"id": 2, "type": "console/chat/feed"})
+    assert {t["id"]: t["status"] for t in (await feed.receive_json())["result"]["threads"]} == {garden: "done", week: "error"}
+    await feed.send_json({"id": 3, "type": "console/chat/seen", "thread_id": week})
+    seen = (await feed.receive_json())["result"]
+    assert seen["ok"] is True and seen["counts"] == {"working": 0, "done": 1, "error": 0}
+    assert (await watcher.receive_json())["event"]["status"] == ""  # every card hears it was opened
+    await feed.send_json({"id": 4, "type": "console/chat/feed"})
+    assert {t["id"]: t["status"] for t in (await feed.receive_json())["result"]["threads"]} == {garden: "done", week: ""}
+    # Replying in a conversation counts as having seen it.
+    provider.complete = real
+    model.say("Still quiet. [[status]]")
+    await chat(hass, hass_ws_client, "and now?", feed, thread_id=garden)
+    await console.async_save_now()
+    assert console.history.feed(late_user(console), thread_id=garden)["threads"][0]["status"] == "done"  # the new reply is unseen
+    assert "garden" not in json.dumps(console.data)  # seen-state lives with the chats, not in Console's store

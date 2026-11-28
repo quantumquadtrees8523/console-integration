@@ -112,6 +112,8 @@ class ChatHistory:
         if not thread["title"] and who == "you":
             thread["title"] = _title(text)
         thread["messages"].append({"at": now, "who": who, "text": text[:TEXT_MAX]} | {k: v for k, v in extra.items() if v})
+        if who == "you":
+            thread["seen"] = now  # whoever writes in a conversation has seen it
         del thread["messages"][:-KEEP]
         thread["at"] = now
         self._save()
@@ -122,8 +124,20 @@ class ChatHistory:
         index of the first reply shown (1 when they all are)."""
         messages = thread["messages"]
         start = max(1, len(messages) - replies)
+        last = next((m for m in reversed(messages) if m.get("who") == "console"), None)
+        unseen = bool(last and (last.get("at") or "") > (thread.get("seen") or ""))
         return {"id": thread["id"], "title": thread["title"], "at": thread.get("at"), "made": thread.get("made"),
-                "root": messages[0] if messages else None, "replies": messages[start:], "from": start, "total": len(messages)}
+                "root": messages[0] if messages else None, "replies": messages[start:], "from": start, "total": len(messages),
+                "status": ("error" if last.get("failed") else "done") if unseen else ""}
+
+    def seen(self, user_id: str, thread_id: str) -> bool:
+        """The person has looked at this conversation since Console last replied in it: its dot goes."""
+        thread = self._thread(user_id, thread_id)
+        if thread is None:
+            return False
+        thread["seen"] = datetime.now(UTC).isoformat()
+        self._save()
+        return True
 
     def feed(self, user_id: str, skip: int = 0, limit: int = 8, thread_id: str | None = None) -> dict[str, Any]:
         """This person's conversations, the one used last first, `limit` at a time after the first `skip`.

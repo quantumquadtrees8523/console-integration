@@ -42,31 +42,47 @@ Until then the card says the cloud agent isn't connected, and plain commands sti
 If the cloud agent can't be used (the month's allowance is spent, the relay has been out of reach for
 longer than a key lasts, or the model fails) the person is told so, and step 1 keeps working.
 
-## Conversations are comment threads
+## Conversations are comment threads, in a drawer
 
-The chat card shows your conversations the way comment threads look: each one starts with what you first
-asked, and Console's replies and your own replies sit under it, indented and joined by a line. Under each
-message: when, **Reply**, and under Console's replies the work behind it (where the request went and why,
-the model's thinking, each tool it used and what came back), a tap away. The two newest replies show;
-**View N earlier replies** brings the rest, and **View earlier conversations** at the top brings older ones.
+The chat card lists your conversations the way a collapsed comment thread looks: what you asked, and under
+it one line with Console's latest reply ("Console: Saved Kids' bedtime…  5 replies"). Tap a conversation
+and the whole thread opens in a **drawer**, from the side on a wide card and from the bottom on a phone:
+what started it, Console's replies and your own indented under it on a connecting line, and a box to reply
+in. Under each message: when, **Reply**, and under Console's replies the work behind it (where the request
+went and why, the model's thinking, each tool it used and what came back), a tap away. **View N earlier
+replies** brings back the rest of a long conversation, and **View earlier conversations** loads older ones.
+
+**Several agents at once.** Each conversation has its own agent. Start one from the box at the bottom, start
+another, open a third and reply, and close the drawer: they all keep working, and each row shows what its
+agent is doing ("Console · Thinking…"). Only one turn runs in a conversation at a time.
+
+**Dots.** Each conversation has a dot on Console's avatar, and the bar at the top counts them across all
+your conversations:
+
+- **pulsing** while its agent is working;
+- **red** when it ended without doing what you asked (the model gave up, the month's allowance ran out);
+- **green** when it finished with a reply you haven't opened yet.
+
+Opening a conversation clears its dot, on every device. The card hears conversations start and finish from
+anywhere, so one started on your phone shows up, working, on the wall tablet.
 
 **Where you write is the scope.**
 
 - The box at the bottom starts a **new conversation**. Console is given a short digest of your other recent
   conversations (what started each one and its last exchange), so "what did we talk about today?" or "that
   thing from earlier" can be answered.
-- **Reply** under a conversation keeps to **that conversation**. Console sees only it, and reads your other
+- **Reply** in a drawer keeps to **that conversation**. Console sees only it, and reads your other
   conversations with its `chat_history` tool only when the reply asks about them.
 
-**Copy** under what started a conversation copies that conversation as text; **Copy all** at the top
-copies every one of them. What was said only, not the steps.
+**Copy** in a conversation's drawer copies it as text; **Copy all** at the top copies every one of them.
+What was said only, not the steps.
 
 - Conversations are kept on the box only, per signed-in person: the newest 40, 200 messages each.
-  **Delete** under one deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
+  **Delete** in a drawer deletes one; Console settings deletes all of yours; the data wipe erases everyone's.
 - A turn runs on the box whoever is watching. If the card reloads, the phone sleeps or the connection
-  drops, the reply still lands in its conversation, and a card that opens meanwhile picks the turn up as
-  it happens. One message is always one turn: nothing is sent again when the connection comes back.
-- A tap on a suggestion goes into the conversation whose reply box is open, or starts one of its own.
+  drops, the reply still lands in its conversation, and the card picks running turns up again. One message
+  is always one turn: nothing is sent again when the connection comes back.
+- A tap on a suggestion goes into the conversation open in the drawer, or starts one of its own.
 
 ## Suggestions and quick actions
 

@@ -15,11 +15,14 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
   card's history is a file of its own on the box (`.storage/console_chat`, `history.py`), per signed-in
   person, as threads (one per conversation), shown and deletable in Console settings and erased by the data
   wipe. Nothing may send it anywhere but to the model, as the conversation it belongs to.
-- The card draws conversations as comment threads (owner, 2026-11-28: "facebook comment threads"): what
-  started one, Console's and the person's replies indented under it, Reply under each. Where a message is
-  written is its scope: a reply stays in its conversation; a new one is told about the person's other
-  recent conversations (`history.digest`, `wording.scope_all`). One conversation or all of them copy out as
-  text (`console/chat/export`).
+- The card lists conversations as collapsed comment threads and opens one whole in a drawer (owner,
+  2026-11-28: "facebook comment threads", "within a drawer though. not completely visible"). Where a
+  message is written is its scope: a reply stays in its conversation; a new one is told about the person's
+  other recent conversations (`history.digest`, `wording.scope_all`). One conversation or all of them copy
+  out as text (`console/chat/export`).
+- Conversations run at once, one turn per conversation. Each has a status dot: working, error (the agent
+  said why it couldn't: `ConsoleData.unfinished`) or done-and-unopened, kept as a per-thread `seen` time in
+  the chat file and cleared by `console/chat/seen`. Cards hear starts and finishes on `console/chat/status`.
 - What the agent is doing during a turn (`trail.py`) goes to the cards showing that chat, and its steps are
   kept with the reply in that person's thread (owner, 2026-11-28: "show each chat and agent's work within
   the thread of a chat"). Same file, same rules as the chat history: on the box only, never logged, never

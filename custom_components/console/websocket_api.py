@@ -46,6 +46,8 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_chat_watch,
         ws_chat_threads,
         ws_chat_feed,
+        ws_chat_status,
+        ws_chat_seen,
         ws_chat_export,
         ws_chat_history,
         ws_chat_thread_delete,
@@ -293,6 +295,7 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     )
     data.streams[thread_id] = live.emit
     data.history.add(user_id, "you", text, thread_id)
+    data.chat_status(user_id, thread_id, "working", data.history.title(user_id, thread_id))
     started = time.monotonic()
     try:
         context = connection.context(msg)
@@ -312,6 +315,9 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
         data.live.pop(thread_id, None)
         if "context" in locals():
             data.via.pop(context.id, None)
+    if thread_id in data.unfinished:  # the agent said why it couldn't (the allowance, the model gave up…)
+        data.unfinished.discard(thread_id)
+        failed = True
     if not speech:
         speech, failed = wording.MODEL_FAILED_REPLY, True
     ms = round((time.monotonic() - started) * 1000)
@@ -321,6 +327,7 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
         failed=failed, steps=kept.steps, meta={k: kept.meta.get(k) for k in ("route", "cost_usd") if k in kept.meta} | {"ms": ms},
     )  # fmt: skip
     live.emit({"kind": "done", "reply": speech, "thread_id": thread_id, "conversation_id": thread_id, "error": failed, "ms": ms})
+    data.chat_status(user_id, thread_id, "error" if failed else "done", data.history.title(user_id, thread_id))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/chat/watch", vol.Required("thread_id"): str})
@@ -373,7 +380,54 @@ def ws_chat_feed(hass: HomeAssistant, connection: websocket_api.ActiveConnection
     for item in feed["threads"]:
         live = data.live.get(item["id"])
         item["working"] = bool(live and live.user_id == connection.user.id)
-    connection.send_result(msg["id"], feed)
+        if item["working"]:
+            item["status"] = "working"
+    connection.send_result(msg["id"], feed | {"counts": _counts(data, connection.user.id)})
+
+
+def _counts(data, user_id: str) -> dict[str, int]:
+    """How many of this person's conversations are working, finished with a reply they haven't opened, or
+    ended in an error they haven't opened: the dots on the card, across every conversation, loaded or not."""
+    counts = {"working": sum(1 for live in data.live.values() if live.user_id == user_id), "done": 0, "error": 0}
+    for thread in data.history.people.get(user_id, []):
+        if thread["id"] in data.live:
+            continue
+        status = data.history._item(thread)["status"]  # noqa: SLF001
+        if status:
+            counts[status] += 1
+    return counts
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/status"})
+@callback
+def ws_chat_status(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Hear about this person's conversations as they start and finish turns, from any card or device:
+    `status` events with the conversation's id and working, done or error."""
+    data = hass.data[DOMAIN]
+    user_id = connection.user.id
+
+    def send(event: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], event | {"counts": _counts(data, user_id)}))
+
+    data.status_watchers.setdefault(user_id, []).append(send)
+
+    def stop() -> None:
+        if send in data.status_watchers.get(user_id, []):
+            data.status_watchers[user_id].remove(send)
+
+    connection.subscriptions[msg["id"]] = stop
+    connection.send_result(msg["id"], {"counts": _counts(data, user_id)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/seen", vol.Required("thread_id"): str})
+@callback
+def ws_chat_seen(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The person opened this conversation: its done or error dot goes, on every card."""
+    data = hass.data[DOMAIN]
+    ok = data.history.seen(connection.user.id, msg["thread_id"])
+    if ok:
+        data.chat_status(connection.user.id, msg["thread_id"], "", data.history.title(connection.user.id, msg["thread_id"]))
+    connection.send_result(msg["id"], {"ok": ok, "counts": _counts(data, connection.user.id)})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/chat/export", vol.Optional("thread_id"): vol.Any(str, None)})
@@ -481,6 +535,7 @@ async def ws_suggestion_tap(hass: HomeAssistant, connection: websocket_api.Activ
         thread_id = data.history.add(user_id, "you", wording.suggestion_tapped(done["name"]), _thread_for(data, user_id, msg.get("thread_id")))
         title, detail = wording.TAP_STEP
         data.history.add(user_id, "console", done["reply"], thread_id, steps=[{"title": title, "detail": detail}], meta={"route": ROUTE_LOCAL})
+        data.history.seen(user_id, thread_id)  # the answer is in front of the person who tapped: no dot for it
         done["thread_id"] = thread_id
     connection.send_result(msg["id"], done)
 

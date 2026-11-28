@@ -99,8 +99,20 @@ class ConsoleData:
         # What a chat turn may draw on, by conversation id, added to the model's instructions for that turn:
         # the person's other recent conversations (a new one), or a note that it is a reply in one.
         self.scope: dict[str, str] = {}
+        # Cards listening for a person's conversations starting and finishing turns (the status dots), by user id.
+        self.status_watchers: dict[str, list[Callable[[dict[str, Any]], None]]] = {}
+        # Conversations whose turn just ended without the agent doing what was asked (it said why instead).
+        self.unfinished: set[str] = set()
         # Requests whose path the caller knows (the chat card, the suggestions run), by context id, for one turn.
         self.via: dict[str, str] = {}
+
+    def chat_status(self, user_id: str, thread_id: str, status: str, title: str = "") -> None:
+        """Tell this person's cards that a conversation is working, or finished (done or error)."""
+        for send in list(self.status_watchers.get(user_id, [])):
+            try:
+                send({"kind": "status", "thread_id": thread_id, "status": status, "title": title})
+            except Exception:  # noqa: BLE001 (a card that went away mustn't break the turn)
+                self.status_watchers[user_id].remove(send)
 
     async def async_load(self) -> None:
         stored = await self._store.async_load()
