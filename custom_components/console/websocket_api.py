@@ -13,7 +13,7 @@ import probatio as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import backups, dashboard, features, knows, suggestions, wipe, wording
+from . import backups, dashboard, features, knows, metrics, suggestions, wipe, wording
 from .const import DOMAIN, PATH_CHAT, ROUTE_LOCAL
 from .history import new_id
 from .status import status
@@ -58,6 +58,9 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_features,
         ws_features_set,
         ws_usage_paths,
+        ws_metrics,
+        ws_metrics_set,
+        ws_metrics_seen,
         ws_update_now,
     ):
         websocket_api.async_register_command(hass, command)
@@ -421,6 +424,8 @@ async def ws_suggestion_tap(hass: HomeAssistant, connection: websocket_api.Activ
     try:
         done = await data.suggestions.tap(msg["suggestion_id"], user_id)
     except suggestions.Refused as error:
+        metrics.tap(data, metrics.suggestion_kind(msg["suggestion_id"], data.suggestions._item(msg["suggestion_id"]) is not None), "failed")  # noqa: SLF001
+        data.changed()
         connection.send_error(msg["id"], "refused", str(error))
         return
     if done["kind"] != "ask":
@@ -485,6 +490,34 @@ def ws_usage_paths(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
     rows = [{"path": p, "turns": got.get(p, {}).get("turns", 0), "spend_usd": round(got.get(p, {}).get("spend_usd", 0.0), 6),
              "credits": credits(got.get(p, {}).get("spend_usd", 0.0))} for p in PATHS]
     connection.send_result(msg["id"], {"period": data.period, "paths": rows, "credits_used": credits(data.spend_usd)})
+
+
+# --- usage details (metrics.py) ---------------------------------------------------------------------
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/metrics"})
+@callback
+def ws_metrics(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Usage details as the household is shown them: the switch, and `body`, the exact text Console's relay
+    is sent when it asks (relay_api.MetricsView answers with the same call)."""
+    connection.send_result(msg["id"], metrics.shown(hass, hass.data[DOMAIN]) | {"is_admin": connection.user.is_admin})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/metrics/set", vol.Required("on"): bool})
+@websocket_api.require_admin
+@callback
+def ws_metrics_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    data = hass.data[DOMAIN]
+    data.set_switch(metrics.SWITCH, msg["on"])
+    connection.send_result(msg["id"], {"on": metrics.on(data)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/metrics/seen", vol.Required("screen"): vol.In(list(metrics.PLAIN["screens"]))})
+@callback
+def ws_metrics_seen(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """One of Console's screens was opened. Which one, from a fixed list; not who, and not when in the day."""
+    metrics.seen(hass.data[DOMAIN], msg["screen"])
+    connection.send_result(msg["id"], {"ok": True})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/update/now"})

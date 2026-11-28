@@ -28,7 +28,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.json import json_dumps
 
-from . import features, openrouter, router, tools, topics, wording
+from . import features, metrics, openrouter, router, tools, topics, wording
 from .const import (
     AGENT_NAME,
     DOMAIN,
@@ -50,7 +50,7 @@ from .const import (
     ROUTE_LOCAL,
     ROUTE_PRO,
 )
-from .state import PATH, ConsoleData
+from .state import PATH, STARTED, ConsoleData
 from .trail import LabelGate, Trail, tool_step
 
 _LOGGER = logging.getLogger(__name__)
@@ -274,9 +274,11 @@ class ConsoleAgent(conversation.ConversationEntity):
         self, user_input: conversation.ConversationInput, chat_log: conversation.ChatLog
     ) -> conversation.ConversationResult:
         token = PATH.set(path_of(self.data, user_input))  # every count and spend in this turn goes to its path
+        began = STARTED.set(time.monotonic())
         try:
             return await self._handle(user_input, chat_log)
         finally:
+            STARTED.reset(began)
             PATH.reset(token)
 
     async def _handle(
@@ -546,6 +548,8 @@ class ConsoleAgent(conversation.ConversationEntity):
                     args = json.loads(function.get("arguments") or "{}")
                 except ValueError as error:
                     raise openrouter.ModelError("tool arguments weren't JSON") from error
+                if function.get("name") in (ESCALATE, HANDOFF):  # Console's own two: every other tool is counted in guard.py
+                    metrics.tool(self.data, DOMAIN, function["name"], None, None, False)
                 if function.get("name") == ESCALATE:
                     raise Escalate
                 if function.get("name") == HANDOFF:

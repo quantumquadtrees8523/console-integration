@@ -153,6 +153,16 @@ Each run goes in the log under Support mode: who, what went from which version t
 - To Console's relay: once in a while, this month's totals. Requests by kind (`control`, `status`,
   `customization`, `setup`, `troubleshooting`, `other`), by route, by agent, how many were done, and
   the spend. No messages, device names, rooms or times of day. Console settings shows the exact payload.
+- To Console's relay, usage details: for each day (a UTC date), how often each AI feature, tool, skill,
+  agent and screen was used, whether it worked (done, failed, not confirmed by the read-back), which model
+  tier answered and how long it took in four bands; what exists on this box and was never used; and a few
+  sentences that say the same in words, written on the box from the counts alone. Every name in it is from
+  a fixed list that ships with Console (`metrics.py`), so nothing you say and no device, room or person
+  can be in it, and there is no time of day. Unlike the labels above, the relay keeps these for this house,
+  where Console's operator can read them. Console settings → What the house knows about you shows the exact
+  bytes that are sent. **Usage details sent to Console** (`switch.console_usage_details`, on unless you turn
+  it off) stops the counting and the sending, and the relay then deletes what it has. Erasing Console's data
+  erases them here and there.
 - To Console's relay, when it asks for the box's status: the versions of Console, Sunrise and Home
   Assistant, and the name, installed version and latest release of each integration HACS manages, so
   the site can show which houses have an update waiting.
@@ -173,7 +183,11 @@ It adds three skills: `console:install` (put Console on a box that has Sunrise),
 
 ```bash
 uv venv -p 3.14 .venv && . .venv/bin/activate && uv pip install -r requirements-test.txt
+git clone --depth 1 https://github.com/quantumquadtrees8523/sunrise ../sunrise   # or set SUNRISE_REPO
 pytest
 ```
+
+One test reads Sunrise's tool table and shipped skills from that checkout and fails if any has no entry in
+Console's usage registry (`metrics.py`), so it fails without the checkout too.
 
 A release is a tag `vX.Y.Z` that matches `version` in `custom_components/console/manifest.json`.

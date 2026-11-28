@@ -9,6 +9,9 @@
 - POST /api/console/relay/update: install the latest release of each HACS integration that has one waiting,
   then restart Home Assistant once (updates.py). Refused while switch.console_updates is off.
 
+- GET  /api/console/relay/metrics: usage details (metrics.py): counts by day of what was used, from fixed
+  lists, with a story in words made from those counts. The household sees the same bytes and has a switch.
+
 The usage summary is counts and labels only (see state.ConsoleData.summary). No message, device name or
 room ever goes in it.
 """
@@ -23,7 +26,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
-from . import wording
+from . import metrics, wording
 from .const import DOMAIN, VERSION
 from .state import ConsoleData
 from .status import status
@@ -45,7 +48,8 @@ def _report(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "usage": data.summary(),
         "support": {"on": data.support.on(), "until": data.data["support"].get("until")},
         "unlinked": bool(data.data.get("unlinked")),
-        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai"), "updates": data.switch("updates")},
+        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai"), "updates": data.switch("updates"),
+                     "metrics": data.switch("metrics")},
         "updates": [{k: r[k] for k in ("name", "version", "latest", "waiting")} for r in hacs_updates(hass)],
     }
 
@@ -92,6 +96,25 @@ class StatusView(HomeAssistantView):
         if batch := data.topics_batch():
             report["topics"] = batch
         return self.json(report)
+
+
+class MetricsView(HomeAssistantView):
+    """Usage details, for Console's relay (console-relay protocol/metrics.md). The answer is metrics.body():
+    the same text Console settings shows the household, to the byte. Nothing is logged here."""
+
+    url = "/api/console/relay/metrics"
+    name = "api:console:relay:metrics"
+
+    async def get(self, request: web.Request) -> web.Response:
+        if not _admin(request):
+            return self.json_message("Administrators only.", 403)
+        hass: HomeAssistant = request.app["hass"]
+        data: ConsoleData = hass.data[DOMAIN]
+        if data.data.get("unlinked"):
+            return self.json_message("This house erased its link to Console. Someone here has to connect it again.", 409)
+        if not data.switch("cloud"):
+            return self.json_message("Cloud access is turned off for this house.", 423)
+        return web.Response(text=metrics.body(hass, data), content_type="application/json")
 
 
 class NotifyView(HomeAssistantView):

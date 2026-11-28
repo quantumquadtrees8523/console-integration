@@ -24,7 +24,7 @@ TITLE = "Home"
 ICON = "mdi:home-heart"
 _LOGGER = logging.getLogger(__name__)
 
-OWN = ("switch.console_cloud_access", "switch.console_ai", "switch.console_updates", "switch.console_cloud_agent")
+OWN = ("switch.console_cloud_access", "switch.console_ai", "switch.console_updates", "switch.console_usage_details", "switch.console_cloud_agent")
 # (section title, icon, domains), in the order they appear after the chat card.
 GROUPS = (
     ("Lights", "mdi:lightbulb-group", ("light",)),

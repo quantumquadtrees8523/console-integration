@@ -13,6 +13,9 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install -r requirements-test.txt
+      # Sunrise's source, read by the test that every Sunrise tool and skill is in Console's usage registry.
+      - run: git clone --depth 1 https://github.com/quantumquadtrees8523/sunrise "$RUNNER_TEMP/sunrise"
+      - run: echo "SUNRISE_REPO=$RUNNER_TEMP/sunrise" >> "$GITHUB_ENV"
       - run: python -m pytest -q
   hassfest:
     runs-on: ubuntu-latest

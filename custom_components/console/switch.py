@@ -10,6 +10,10 @@
 - switch.console_updates: updates from Console's site. On: Console's operator can install the latest release of
   each integration HACS manages here, then restart Home Assistant (updates.py). Off: only someone at the house can.
 
+- switch.console_usage_details: usage details (metrics.py). On: this box counts what is used by day, from
+  fixed lists, and Console's relay reads those counts. Off: nothing is counted or sent, and the relay deletes
+  what it has for this house.
+
 Neither of the first two is a firewall: other things on the box that use the internet by themselves (Home Assistant
 Cloud, a music service, HACS) are not affected by them.
 """
@@ -42,6 +46,7 @@ async def async_setup_entry(
             KillSwitch(data, entry, "cloud", "switch.console_cloud_access", "Cloud access", "mdi:cloud-outline"),
             KillSwitch(data, entry, "ai", "switch.console_ai", "AI in this house", "mdi:robot-outline"),
             KillSwitch(data, entry, "updates", "switch.console_updates", "Updates from Console's site", "mdi:update"),
+            KillSwitch(data, entry, "metrics", "switch.console_usage_details", "Usage details sent to Console", "mdi:chart-box-outline"),
         ]
     )
 

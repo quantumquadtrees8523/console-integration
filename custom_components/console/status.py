@@ -51,7 +51,7 @@ def status(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "sunrise": bool(sunrise),
         "support": {"on": data.support.on(), "until": data.data["support"].get("until"), "log": list(data.data["support"].get("log") or [])[-30:]},
         "unlinked": bool(data.data.get("unlinked")),
-        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai"), "updates": data.switch("updates")},
+        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai"), "updates": data.switch("updates"), "metrics": data.switch("metrics")},
         "updates": updates.hacs_updates(hass),
         "agent": data.feature("agent"),
         "credits": {"used": credits(data.spend_usd), "allowed": credits(data.cap_usd)},

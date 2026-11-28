@@ -29,6 +29,22 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
   the AI features tab). A new one gets a row there. `cloud_state()` is what the relay is told: a feature
   switch never changes it.
 - Usage is shown to a household in credits (one cent each, `credits.py`), never dollars. A plan's price stays in dollars.
+- Usage is counted in one place, `metrics.py`, and everything reports through it: every request
+  (`ConsoleData.count_turn`), every tool any agent calls, Console's own or Claude and Claude Code through the
+  connector (`guard.CountedTool`, in front of every LLM API), taps and opened screens. Its `REGISTRY` is the
+  single list of what can be counted. A new AI feature, tool, skill, agent, surface or screen is not done
+  until it has an entry there and a plain name in `wording.METRIC_NAMES`; tests fail without (and one reads
+  Sunrise's tools and skills from a checkout: `SUNRISE_REPO`, or `../sunrise`). Don't count anywhere else.
+- Usage details keep to an allow-list, and that is the privacy rule: only ids from `REGISTRY` and the other
+  fixed tuples in `metrics.py` are stored or sent, an unknown name lands on a catch-all (`unregistered`), a
+  count is a number, a day is a UTC date. Never add a field that could hold words, a name, an entity, a room,
+  a person or a time of day, and never derive a count from what was said: from the tool's name and its
+  result only. The story is built from `wording.STORY` and the names alone, and `metrics.scrub` refuses any
+  other word. The household is shown the exact bytes that are sent (`metrics.body`, one function for both),
+  has `switch.console_usage_details`, and the data wipe erases the counts.
+- The lists and the story's words are a contract: console-relay `protocol/metrics.md`, with a copy of its
+  schema at `tests/metrics.schema.json`. Add to the relay's lists and release it first, then register here
+  and copy the schema: a box that sends an id the relay doesn't know has its whole report refused.
 - The relay's requests to the box are in `relay_api.py`, and their contract is `protocol/tunnel.md` in
   `console-relay`. Change the contract there first.
 - Release: bump `version` in `manifest.json` and `VERSION` in `const.py`, merge, then tag `vX.Y.Z` or press Run workflow on `release` (main; an agent can start it through GitHub's API).
