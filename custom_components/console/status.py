@@ -31,6 +31,8 @@ def banner(data: ConsoleData) -> dict[str, Any] | None:
         return {"kind": "stop", "text": wording.over_limit(next_reset(data.now()), data.plan)}
     if state == "not_linked":
         return {"kind": "offline", "text": wording.NOT_LINKED}
+    if not data.feature("agent"):
+        return {"kind": "off", "text": wording.AGENT_OFF}
     return None
 
 
@@ -50,6 +52,7 @@ def status(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "support": {"on": data.support.on(), "until": data.data["support"].get("until"), "log": list(data.data["support"].get("log") or [])[-30:]},
         "unlinked": bool(data.data.get("unlinked")),
         "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai")},
+        "agent": data.feature("agent"),
         "credits": {"used": credits(data.spend_usd), "allowed": credits(data.cap_usd)},
         "site": data.data.get("site"),
         "onboarding": dict(data.data["onboarding"]),

@@ -1,5 +1,5 @@
-"""The chat card's own channel: a turn told as it happens, kept on the box, and handed to Claude Code
-when the chat can't do it."""
+"""The chat card's own channel: a turn told as it happens, kept on the box in the thread it belongs to
+with the steps behind each reply, and handed to Claude Code when the chat can't do it."""
 
 from __future__ import annotations
 
@@ -120,18 +120,22 @@ async def test_what_the_chat_cannot_do_is_handed_to_claude_code(hass, console, m
     assert len(model.calls) == 1  # no second model call: the handoff is the reply
 
 
-async def test_a_conversation_is_kept_on_the_box_and_comes_back_ten_at_a_time(hass, console, model, hass_ws_client):
+async def test_a_chat_is_a_thread_kept_on_the_box_and_comes_back_ten_at_a_time(hass, console, model, hass_ws_client):
     link(console)
     client = await hass_ws_client(hass)
+    thread = None
     for n in range(12):
         model.say(f"Answer {n}. [[other]]")
-        await chat(hass, hass_ws_client, f"question number {n} about the garden", client)
-    await client.send_json({"id": 900, "type": "console/chat/history"})
+        result, _ = await chat(hass, hass_ws_client, f"question number {n} about the garden", client, **({"thread_id": thread} if thread else {}))
+        thread = thread or result["thread_id"]
+        assert result["thread_id"] == thread  # every message went into the one chat
+    await client.send_json({"id": 900, "type": "console/chat/history", "thread_id": thread})
     newest = (await client.receive_json())["result"]
-    assert newest["total"] == 24 and len(newest["messages"]) == 10 and newest["more"] is True
+    assert newest["total"] == 24 and len(newest["messages"]) == 10 and newest["more"] is True and newest["working"] is False
+    assert newest["title"] == "question number 0 about the garden"  # a chat is called what it was started with
     assert [m["who"] for m in newest["messages"][-2:]] == ["you", "console"]
     assert newest["messages"][-1]["text"] == "Answer 11."
-    await client.send_json({"id": 901, "type": "console/chat/history", "before": newest["from"]})
+    await client.send_json({"id": 901, "type": "console/chat/history", "thread_id": thread, "before": newest["from"]})
     earlier = (await client.receive_json())["result"]
     assert len(earlier["messages"]) == 10 and earlier["messages"][-1]["text"] == "Answer 6."
     assert earlier["from"] == 4 and earlier["more"] is True
@@ -146,23 +150,150 @@ async def test_a_conversation_is_kept_on_the_box_and_comes_back_ten_at_a_time(ha
     assert (await client.receive_json())["result"]["my_chat_messages"] == 0
 
 
-async def test_each_person_has_their_own_history(hass, console, model, hass_ws_client, hass_read_only_access_token):
+async def test_the_work_behind_a_reply_is_kept_in_its_thread(hass, console, model, lights_off, hass_ws_client):
+    """Owner, 2026-11-28: show each chat and the agent's work within the thread of a chat. So a reply is
+    stored with its steps (where it went, the thinking, each tool and what came back) and its facts."""
+    link(console)
+    model.script.append({"role": "assistant", "content": "Let me do that.", "thinking": "They want it dark. Turn the kitchen light off.", "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "assist__intent__HassTurnOff", "arguments": json.dumps({"name": "Kitchen light"})}}]})
+    model.say("The kitchen light is off. [[control]]")
+    client = await hass_ws_client(hass)
+    result, _ = await chat(hass, hass_ws_client, "could you make the kitchen dark for the movie", client)
+    await client.send_json({"id": 950, "type": "console/chat/history", "thread_id": result["thread_id"]})
+    you, reply = (await client.receive_json())["result"]["messages"]
+    assert you == {"at": you["at"], "who": "you", "text": "could you make the kitchen dark for the movie"}  # nothing extra on a person's own message
+    steps = reply["steps"]
+    assert [s["title"] for s in steps] == ["Tried at home first", "Sent to the cloud agent", "Thinking", "Said", "Home Assistant action TurnOff"]
+    assert steps[2] == {"kind": "think", "title": "Thinking", "detail": "They want it dark. Turn the kitchen light off."}
+    assert steps[3]["detail"] == "Let me do that." and "Kitchen light" in steps[4]["detail"] and steps[4]["result"]
+    assert reply["meta"]["route"] == "flash" and reply["meta"]["cost_usd"] == 0.002 and reply["meta"]["ms"] >= 0
+    # Still on the box only: the steps are in the chat file, not in Console's store.
+    assert "make the kitchen dark" not in json.dumps(console.data) and "Tried at home first" not in json.dumps(console.data)
+
+
+async def test_chats_are_listed_newest_first_and_one_can_be_deleted(hass, console, model, hass_ws_client):
+    link(console)
+    client = await hass_ws_client(hass)
+    model.say("Roses like sun. [[other]]")
+    first, _ = await chat(hass, hass_ws_client, "where should the roses go in the garden", client)
+    model.say("Tuesday. [[other]]")
+    second, _ = await chat(hass, hass_ws_client, "when is the recycling collected on our street", client)
+    assert first["thread_id"] != second["thread_id"]  # a message with no chat named starts a new one
+    await client.send_json({"id": 960, "type": "console/chat/threads"})
+    threads = (await client.receive_json())["result"]["threads"]
+    assert [t["title"] for t in threads] == ["when is the recycling collected on our street", "where should the roses go in the garden"]
+    assert threads[0]["count"] == 2 and threads[0]["last"] == "Tuesday." and threads[0]["working"] is False
+    await client.send_json({"id": 961, "type": "console/chat/history"})  # no chat named: the one used last
+    assert (await client.receive_json())["result"]["thread_id"] == second["thread_id"]
+    await client.send_json({"id": 962, "type": "console/chat/thread/delete", "thread_id": second["thread_id"]})
+    assert (await client.receive_json())["result"] == {"deleted": 2}
+    await client.send_json({"id": 963, "type": "console/chat/threads"})
+    assert [t["id"] for t in (await client.receive_json())["result"]["threads"]] == [first["thread_id"]]
+
+
+async def test_a_history_from_before_threads_becomes_one_chat(hass, console):
+    from custom_components.console.history import EARLIER, ChatHistory
+
+    old = [{"at": "2026-11-01T10:00:00+00:00", "who": "you", "text": "hello"}, {"at": "2026-11-01T10:00:02+00:00", "who": "console", "text": "Hi."}]
+    [thread] = ChatHistory._threads(old)  # noqa: SLF001
+    assert thread["title"] == EARLIER and thread["messages"] == old and thread["id"].startswith("console-")
+    assert ChatHistory._threads([thread]) == [thread]  # noqa: SLF001 (already threads: left as they are)
+
+
+async def test_each_person_has_their_own_chats(hass, console, model, hass_ws_client, hass_read_only_access_token):
     link(console)
     model.say("Hello. [[other]]")
-    await chat(hass, hass_ws_client, "this is the owner speaking")
+    mine, _ = await chat(hass, hass_ws_client, "this is the owner speaking")
     other = await hass_ws_client(hass, hass_read_only_access_token)
     await other.send_json({"id": 1, "type": "console/chat/history"})
     assert (await other.receive_json())["result"]["total"] == 0
+    await other.send_json({"id": 2, "type": "console/chat/history", "thread_id": mine["thread_id"]})
+    assert (await other.receive_json())["result"]["total"] == 0  # naming someone's chat shows nothing of it
+    model.say("Hi. [[other]]")
+    theirs, _ = await chat(hass, hass_ws_client, "let me into that chat please", other, thread_id=mine["thread_id"])
+    assert theirs["thread_id"] != mine["thread_id"]  # nor can they write into it: they get a chat of their own
+    assert "owner speaking" not in json.dumps(model.calls[-1]["messages"])
 
 
-async def test_earlier_messages_on_screen_are_given_to_the_model_after_a_reload(hass, console, model, hass_ws_client):
+async def test_a_thread_picked_up_later_gives_the_model_what_was_said_in_it(hass, console, model, hass_ws_client):
+    from homeassistant.helpers.chat_session import DATA_CHAT_SESSION
+
     link(console)
+    client = await hass_ws_client(hass)
     model.say("Her name is Priya. [[other]]")
-    await chat(hass, hass_ws_client, "my sister is called Priya")
+    first, _ = await chat(hass, hass_ws_client, "my sister is called Priya", client)
+    model.say("Something else. [[other]]")
+    await chat(hass, hass_ws_client, "this is a different chat about the boiler", client)
+    for session in list(hass.data[DATA_CHAT_SESSION].values()):  # Home Assistant forgets its conversations (a restart)
+        session.async_cleanup()
     model.say("Priya. [[other]]")
-    await chat(hass, hass_ws_client, "what is my sister called", earlier=2)  # a new conversation, two earlier shown
+    await chat(hass, hass_ws_client, "what is my sister called", client, thread_id=first["thread_id"])
     sent = [m["content"] for m in model.calls[-1]["messages"] if m["role"] in ("user", "assistant")]
-    assert sent[:2] == ["my sister is called Priya", "Her name is Priya."] and sent[-1] == "what is my sister called"
+    assert sent == ["my sister is called Priya", "Her name is Priya.", "what is my sister called"]  # that thread, and only it
+
+
+async def test_a_card_that_opens_a_chat_mid_turn_watches_the_turn_and_the_reply_is_kept_without_it(hass, console, model, hass_ws_client):
+    """The streaming bugs (2026-11-28): a card that reloaded or reconnected mid-turn waited for ever, and
+    its reconnect sent the message again. Now the turn runs whoever is listening, a card that opens the
+    chat meanwhile is told everything so far and then the rest, and one message is one turn."""
+    import asyncio
+
+    link(console)
+    gate, entered = asyncio.Event(), asyncio.Event()
+    real = model.complete
+
+    async def slow(*args, **kwargs):
+        on_delta = kwargs.get("on_delta")
+        if on_delta:
+            on_delta("thinking", "Let me look.")
+        entered.set()
+        await gate.wait()
+        kwargs["on_delta"] = None
+        return await real(*args, **kwargs)
+
+    model.complete = slow
+    from custom_components.console import openrouter as provider
+
+    provider.complete = slow
+    model.say("All quiet in the garden. [[status]]")
+    asker = await hass_ws_client(hass)
+    await asker.send_json({"id": 1, "type": "console/chat", "text": "is anything odd going on in the garden tonight"})
+    thread = (await asker.receive_json())["result"]["thread_id"]
+    await entered.wait()
+
+    await asker.send_json({"id": 2, "type": "console/chat", "text": "and again", "thread_id": thread})
+    while (busy := await asker.receive_json())["id"] != 2:
+        pass
+    assert busy["success"] is False and busy["error"]["code"] == "busy"  # one turn at a time in a chat
+
+    late = await hass_ws_client(hass)
+    await late.send_json({"id": 1, "type": "console/chat/history", "thread_id": thread})
+    page = (await late.receive_json())["result"]
+    assert page["working"] is True and [m["who"] for m in page["messages"]] == ["you"]
+    await late.send_json({"id": 2, "type": "console/chat/watch", "thread_id": thread})
+    assert (await late.receive_json())["result"] == {"working": True}
+    caught_up = [(await late.receive_json())["event"] for _ in range(4)]
+    assert caught_up[0] == {"kind": "thread", "thread_id": thread}
+    assert [e.get("title") or e["kind"] for e in caught_up[1:]] == ["Tried at home first", "Sent to the cloud agent", "thinking"]
+
+    await asker.close()  # the card that asked goes away mid-turn
+    await hass.async_block_till_done()
+    gate.set()
+    while (event := (await late.receive_json())["event"])["kind"] != "done":
+        pass
+    assert event["reply"] == "All quiet in the garden." and event["thread_id"] == thread
+    assert console.live == {} and console.streams == {}
+    replies = [m for m in console.history.page(late_user(console), thread)["messages"] if m["who"] == "console"]
+    assert len(replies) == 1 and replies[0]["text"] == "All quiet in the garden." and len(model.calls) == 1
+
+    await late.send_json({"id": 3, "type": "console/chat/watch", "thread_id": thread})
+    assert (await late.receive_json())["result"] == {"working": False}  # nothing running any more
+    assert (await late.receive_json())["event"] == {"kind": "gone"}  # so a card that was waiting reads the thread instead
+
+
+def late_user(console) -> str:
+    [user_id] = list(console.history.people)
+    return user_id
 
 
 async def test_the_card_is_also_a_dashboard_resource_for_the_phone_apps(hass, console):
@@ -284,3 +415,15 @@ async def test_the_card_shows_thinking_as_one_line_with_the_rest_a_tap_away(hass
     script = await (await client.get("/console_static/console-chat-card.js")).text()
     assert "const gist = (text)" in script and "thinking.d.textContent = gist(thinking.full)" in script
     assert '"Show all"' in script and "thinking.d.textContent += event.text" not in script
+
+
+async def test_the_card_keeps_one_turn_one_message_and_shows_chats_as_threads(hass, console, hass_client):
+    """What the card must do for the server's promises to hold: never send a message again when its
+    connection comes back, pick a running turn up by watching it, and page within one chat."""
+    client = await hass_client()
+    script = await (await client.get("/console_static/console-chat-card.js")).text()
+    assert "resubscribe: false" in script  # Home Assistant would otherwise send the chat command again on reconnect
+    assert '"console/chat/watch"' in script and 'addEventListener("ready"' in script
+    assert '"console/chat/threads"' in script and '"console/chat/thread/delete"' in script
+    assert "thread_id: this._thread" in script
+    assert '"console/suggestions/seen"' in script and "_drawSuggested" in script and "_drawQuick" in script

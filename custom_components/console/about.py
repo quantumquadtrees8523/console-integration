@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
-from . import music
+from . import features, music, wording
 from .const import DOMAIN, MODEL_FLASH, MODEL_PRO, VERSION
 from .credits import credits
 from .state import next_reset
@@ -21,7 +21,8 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
     return {
         "what_console_is": (
             "Console is the opinionated layer on Home Assistant and Sunrise: this chat's agent, the Home "
-            "dashboard, the Console page (plan and usage, what the house knows about you, settings), and the "
+            "dashboard, Console settings in the sidebar (plan and usage, what the house knows about you, AI "
+            "features, general), and the "
             "link to Console's relay, which lets the household open the house away from home and connect Claude."
         ),
         "versions": {"console": VERSION, "sunrise": str(sunrise.version) if sunrise and sunrise.version else None, "home_assistant": HA_VERSION},
@@ -39,8 +40,18 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
         "off_switches": {
             "AI in this house": {"on": data.switch("ai"), "off_means": "no AI agent can use this house's tools; plain commands still work"},
             "Cloud access": {"on": data.switch("cloud"), "off_means": "the house is off Console's relay: no access from outside, no Claude through the connector, no cloud agent; it can only be turned back on from inside the house"},
-            "where": "Home dashboard tiles, or the Console page > Settings",
+            "where": "Home dashboard tiles, or Console settings > General",
         },
+        "ai_features": {
+            "what": "each use of Console's cloud agent has its own switch, with what it tends to cost and what it used this month",
+            "now": {wording.FEATURES[row.key]["name"]: "on" if data.feature(row.key) else "off" for row in features.FEATURES},
+            "where": "Console settings > AI features; only an administrator can switch one, and this chat can't",
+        },
+        "chat_suggestions": (
+            "The chat always shows three suggestions to tap, made on this box with no AI from what's on and how the "
+            "house is used; a tap runs one at home. Tapped 3 times on 2 different days, one becomes a quick action "
+            "under the chat. Seen 4 times and never tapped, it's put away for 30 days."
+        ),
         "support_mode": {"on": data.support.on(), "until": data.data["support"].get("until")},
         "relay_site": data.data.get("site"),
         "how_a_request_is_answered": [
@@ -63,12 +74,13 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
             "use a web browser, open the router's pages, or sign in anywhere",
             "run commands on the box or install software",
             "see or handle passwords, keys or tokens",
-            "turn the off switches or support mode on or off",
+            "turn the off switches, an AI feature or support mode on or off",
         ],
         "when_it_cannot": "call console_handoff: the person gets steps and a block to paste into Claude Code",
         "what_is_kept": (
-            "Chat history is kept on this box only, per signed-in person, and is listed and deletable on the "
-            "Console page under What the house knows about you. Monthly totals (counts by kind and route, and "
+            "Chats are kept on this box only, per signed-in person, as threads with the steps behind each reply, "
+            "and are deletable in the chat card's list and in Console settings under What the house knows about "
+            "you. Monthly totals (counts by kind and route, and "
             "credits used) go to Console's relay, and so do counts of what kind of thing each request was, as "
             "labels from a fixed list such as lights.on_off, which the relay adds to one total for all houses "
             "and does not keep for this house; no message, device name or room does."
