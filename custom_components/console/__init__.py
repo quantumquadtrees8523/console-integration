@@ -61,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for view in (
             relay_api.ConfigView,
             relay_api.StatusView,
+            relay_api.MetricsView,
             relay_api.NotifyView,
             relay_api.SupportView,
             relay_api.TokenView,

@@ -235,6 +235,7 @@ class ConsoleChatCard extends HTMLElement {
     // chat again from the box: the turn that was running went on without this card.
     this._hass.connection.addEventListener("ready", () => { if (this._loaded) this._resync(true); });
     try { this._welcome = (await this._ws({ type: "console/status" })).onboarding || {}; } catch (e) { this._welcome = {}; }
+    this._ws({ type: "console/metrics/seen", screen: "chat_card" }).catch(() => {});  // usage details: that the card was opened, nothing else
     this._loadSuggested();
     await this._loadFeed();
     this._loaded = true;

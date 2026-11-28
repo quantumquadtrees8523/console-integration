@@ -84,7 +84,12 @@ class ConsolePanel extends HTMLElement {
     try {
       this._status = await this._ws({ type: "console/status" });
       if (this._tab === "plan") { try { this._paths = await this._ws({ type: "console/usage/paths" }); } catch (e) { this._paths = null; } }
-      if (this._tab === "knows") this._knows = await this._ws({ type: "console/knows" });
+      if (this._tab === "knows") {
+        this._knows = await this._ws({ type: "console/knows" });
+        try { this._metrics = await this._ws({ type: "console/metrics" }); } catch (e) { this._metrics = null; }
+      }
+      // Which of Console's screens was opened, counted once per visit to a tab (usage details: a fixed name, nothing else).
+      if (this._seenTab !== this._tab) { this._seenTab = this._tab; this._ws({ type: "console/metrics/seen", screen: "settings_" + (this._tab === "settings" ? "general" : this._tab) }).catch(() => {}); }
       if (this._tab === "settings") this._backup = await this._ws({ type: "console/backup/status" });
       if (this._tab === "features") {
         try { this._features = await this._ws({ type: "console/features" }); } catch (e) { this._features = null; }
@@ -208,13 +213,32 @@ class ConsolePanel extends HTMLElement {
       <section><h2>Learned sentences</h2>
         <p class="soft">Phrasings this household says often, taught to Home Assistant's own agent so they run at home without the cloud.</p>${learned}</section>
       <section><h2>What is sent out</h2>
-        <p class="soft">Once in a while Console sends two things to Console's relay, and nothing else: no messages, no device names, no rooms, no times of day.</p>
+        <p class="soft">Once in a while Console sends these things to Console's relay, and nothing else: no messages, no device names, no rooms, no times of day.</p>
         <p class="soft"><b>1. This month's totals for this house.</b> This is exactly what is sent (<code>spend_usd</code> is in dollars: 0.12 there is 12 credits):</p>
         <pre>${esc(JSON.stringify(k.usage, null, 2))}</pre>
         <p class="soft"><b>2. What kind of thing each request was</b>, as a label from a fixed list, such as <code>lights.on_off</code> or <code>automations.create</code>. Console works the label out from what was done, not from your words. The relay adds these counts to one total for all houses together and does not keep them for this house. These are the counts on this box waiting to be sent:</p>
         <pre>${esc(JSON.stringify(k.topics || {}, null, 2))}</pre>
+        ${this._metricsHtml(s)}
         <p class="soft">To erase these counts along with everything else Console keeps, use General → Erase Console and Sunrise data.</p></section>
       <p class="soft">${esc(this._said)}</p>`;
+  }
+
+  // Usage details (metrics.py): every word here comes from the box (wording.METRICS_PAGE), and `body` is the exact text that is sent.
+  _metricsHtml(s) {
+    const m = this._metrics;
+    if (!m) return "";
+    const w = m.words;
+    let pretty = m.body;
+    try { pretty = JSON.stringify(JSON.parse(m.body), null, 2); } catch (e) { /* shown as it is */ }
+    return `<p class="soft"><b>3. ${esc(w.title)}.</b> ${esc(w.about)} ${esc(w.unlike)}</p>
+        <p><b>${esc(m.on ? w.on : w.off)}</b></p>
+        <p class="soft">${esc(w.off_means)}</p>
+        ${m.is_admin ? `<div class="row"><button class="act" data-do="switch" data-entity="switch.console_usage_details" data-on="${m.on ? "0" : "1"}">${esc(m.on ? w.turn_off : w.turn_on)}</button></div>` : ""}
+        ${m.held ? `<p class="soft">${esc(w.held)}</p>` : ""}
+        ${m.story ? `<p class="soft">${esc(w.story)}</p><p>${esc(m.story)}</p>` : ""}
+        <p class="soft">${esc(w.exact)}</p>
+        <details><summary>${esc(m.body.length)} bytes</summary><pre>${esc(pretty)}</pre><pre class="raw">${esc(m.body)}</pre></details>
+        <p class="soft">${esc(w.erase)}</p>`;
   }
 
   _settings(s) {

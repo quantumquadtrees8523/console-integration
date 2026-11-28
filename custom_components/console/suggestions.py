@@ -52,6 +52,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
+import time
 from typing import Any
 
 from homeassistant.core import Context, HomeAssistant, State, callback
@@ -59,7 +60,7 @@ from homeassistant.helpers import area_registry as ar, device_registry as dr, en
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
-from . import wording
+from . import metrics, wording
 from .const import DOMAIN, LLM_API_SUNRISE, PATH_SUGGESTIONS, PATH_TAPS
 
 _LOGGER = logging.getLogger(__name__)
@@ -435,6 +436,8 @@ class Suggestions:
         }
 
     def _count(self, what: str) -> None:
+        if what != "tapped":  # a tap is counted with how it went (tap, below)
+            metrics.event(self.data, what)
         month = self.state["counts"].setdefault(self.data.period, {})
         month[what] = month.get(what, 0) + 1
 
@@ -579,6 +582,7 @@ class Suggestions:
         state = self.state
         now, day = self.data.now(), self._day()
         gone: list[str] = []
+        metrics.event(self.data, "shown", len(dict.fromkeys(ids)))
         for sid in dict.fromkeys(ids):
             item = self._item(sid)
             if item is not None:
@@ -641,6 +645,7 @@ class Suggestions:
         run here: the answer carries the words, and the card asks them."""
         state = self.state
         now, day = self.data.now(), self._day()
+        began = time.monotonic()
         item = self._item(sid)
         if item is not None:
             tried = await self._routine({"op": "try", "id": sid}, user_id)
@@ -670,6 +675,9 @@ class Suggestions:
         self._count("tapped")
         if kind != "ask":
             self.data.count_path(PATH_TAPS)
+        unsure = any(t.get("result") not in (None, "CHECKED") for t in things)
+        metrics.tap(self.data, metrics.suggestion_kind(sid, item is not None), "unconfirmed" if unsure else "ok", was_quick,
+                    (time.monotonic() - began) * 1000)  # fmt: skip
         promoted = self._promote(row)
         self.data.changed()
         note = wording.suggestion_progress(int(row["taps"]), len(row["tap_days"]), PROMOTE_TAPS, PROMOTE_DAYS, promoted, was_quick)

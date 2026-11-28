@@ -40,7 +40,7 @@ class ConsoleMusicPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._started) { this._started = true; this._open(); }
+    if (!this._started) { this._started = true; this._open(); hass.callWS({ type: "console/metrics/seen", screen: "music_panel" }).catch(() => {}); }
   }
 
   set narrow(narrow) { this.toggleAttribute("narrow", !!narrow); }

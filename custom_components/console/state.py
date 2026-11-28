@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextvars import ContextVar
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 
+from . import metrics
 from .const import (
     CATEGORIES,
     DEFAULT_PLAN,
@@ -27,6 +29,8 @@ from .const import (
 
 # Where the request being answered came from, for the length of one turn (conversation.py sets it).
 PATH: ContextVar[str | None] = ContextVar("console_path", default=None)
+# When that turn started (time.monotonic), so its length can be counted in a band (metrics.py).
+STARTED: ContextVar[float | None] = ContextVar("console_started", default=None)
 
 
 def period_of(now: datetime) -> str:
@@ -68,8 +72,9 @@ def _fresh() -> dict[str, Any]:
         "dashboard": {},
         "made": {},  # dashboards made through the agent's `dashboard` tool, by url path
         "linked_at": None,
-        # the off switches (cloud access, AI) and updates from Console's site: on unless the household turns one off
-        "switches": {"cloud": True, "ai": True, "updates": True},
+        # the off switches (cloud access, AI), updates from Console's site and usage details: on unless the
+        # household turns one off
+        "switches": {"cloud": True, "ai": True, "updates": True, "metrics": True},
         "site": None,  # the relay's address for this household, as the relay last gave it
         "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
         # What kind of thing each request was (topics.py), by month, not yet sent; and the batch being
@@ -79,6 +84,7 @@ def _fresh() -> dict[str, Any]:
         "suggestions": {"on": False, "items": [], "home": {}, "rest": {}, "never": [], "kept": [], "last_run": None, "counts": {}},
         "style": {"on": True, "last_run": None},  # style.py
         "features": {},  # features.py: the AI features switched away from their defaults
+        "metrics": metrics.fresh(),  # metrics.py: counts by day of what was used, from fixed lists only
     }
 
 
@@ -190,7 +196,7 @@ class ConsoleData:
 
     @callback
     def set_switch(self, key: str, on: bool) -> None:
-        self.data.setdefault("switches", {"cloud": True, "ai": True, "updates": True})[key] = bool(on)
+        self.data.setdefault("switches", {"cloud": True, "ai": True, "updates": True, "metrics": True})[key] = bool(on)
         self.changed()
 
     def feature(self, key: str) -> bool:
@@ -252,7 +258,10 @@ class ConsoleData:
         self, route: str, category: str, ok: bool, agent: str = "console", topic: str | None = None,
         path: str | None = None,
     ) -> None:
-        if path := path or PATH.get():
+        path = path or PATH.get()
+        began = STARTED.get()
+        metrics.turn(self, route, category, ok, path, (time.monotonic() - began) * 1000 if began is not None else None)
+        if path:
             self._path_row(path)["turns"] += 1
         if topic:
             waiting = self._topics()["pending"].setdefault(self.period, {})

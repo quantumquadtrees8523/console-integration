@@ -382,3 +382,142 @@ MUSIC_NOT_ANSWERING = "Music Assistant isn't answering."
 MUSIC_NO_SETUP = "Music Assistant didn't start its Home Assistant setup."
 MUSIC_SETUP_REFUSED = "Music Assistant didn't accept Home Assistant."
 MUSIC_LOGIN_OFF = "Music Assistant connected to Home Assistant, but its Home Assistant login didn't turn on."
+
+
+# --- usage details (metrics.py): what each counted thing is called, the weekly story, the page ------
+
+# Every counted thing has a plain name here: the story is built from these and nothing else, and the page
+# lists them. A thing with no name can't be registered (tests/test_metrics.py).
+METRIC_NAMES = {
+    "features": {
+        "agent": "the cloud agent",
+        "pro": "the stronger model",
+        "suggestions": "suggested routines",
+        "style": "weekly reply style",
+        "chips": "suggestions and quick actions",
+    },
+    "tools": {
+        "house_map": "reading the house",
+        "act": "switching things",
+        "audit": "the house audit",
+        "diagnose_device": "device diagnosis",
+        "fix_device": "device fixes",
+        "registry_edit": "renaming and tidying",
+        "discovered": "adding found devices",
+        "changes": "the change list",
+        "routine": "routines",
+        "undo": "undo",
+        "backup": "checkpoints",
+        "update": "integration updates",
+        "network_check": "the network check",
+        "usage": "house usage",
+        "list_skills": "the skill list",
+        "get_skill": "reading a skill",
+        "skill_update": "editing skills",
+        "memory_list": "the memory list",
+        "memory_read": "reading memory",
+        "memory_write": "writing memory",
+        "memory_delete": "deleting memory",
+        "behavior_log": "the behavior history",
+        "behavior_revert": "reverting behavior",
+        "log_run": "run logs",
+        "music": "music",
+        "dashboard": "dashboards",
+        "about": "facts about Console",
+        "chat_history": "chat history",
+        "console_handoff": "handing off to Claude Code",
+        "console_escalate": "asking the stronger model",
+        "assist_intent": "Home Assistant's own tools",
+        "other": "other tools",
+        "unregistered": "unregistered tools",
+    },
+    "skills": {
+        "add-a-device": "add a device",
+        "build-a-skill": "build a skill",
+        "custom-cards": "custom cards",
+        "device-diagnosis": "device diagnosis",
+        "explain": "explain",
+        "improve-home": "improve home",
+        "learn-the-house": "learn the house",
+        "match-my-style": "match my style",
+        "music-assistant": "music assistant",
+        "routines": "routines",
+        "self-knowledge": "self knowledge",
+        "undo": "undo",
+        "welcome": "welcome",
+        "wifi-diagnosis": "wifi diagnosis",
+        "own": "the household's own skills",
+    },
+    "agents": {
+        "cloud_agent": "Console's cloud agent",
+        "assist_local": "Home Assistant's own agent at home",
+        "connector": "Claude and other agents through the connector",
+        "support": "agents in support mode",
+        "taps": "taps on suggestions",
+    },
+    "surfaces": {
+        "chat": "the chat card",
+        "voice": "voice",
+        "assist": "Assist in the app",
+        "suggestions": "the suggested routines run",
+        "style": "the reply style run",
+        "automations": "automations and scripts",
+        "suggestion_taps": "suggestion taps",
+        "claude": "the connector",
+        "support": "support mode",
+    },
+    "screens": {
+        "chat_card": "the chat card",
+        "settings_plan": "the Plan tab",
+        "settings_knows": "the What the house knows tab",
+        "settings_features": "the AI features tab",
+        "settings_general": "the General tab",
+        "music_panel": "the Music Assistant page",
+    },
+}
+
+# The story's sentences. Only these words, the names above, dates and numbers can be in a story
+# (metrics.scrub refuses anything else before it is sent).
+STORY = {
+    "nothing": "From {start} to {end} this house made no requests.",
+    "requests": "From {start} to {end} this house made {turns} requests: {ok} done, {failed} not done.",
+    "agents": "Answered by: {list}.",
+    "surfaces": "Asked from: {list}.",
+    "features": "AI features used: {list}.",
+    "tools": "Tools used most: {list}.",
+    "skills": "Skills read: {list}.",
+    "screens": "Screens opened: {list}.",
+    "taps": "Suggestions were tapped {taps} times and {promoted} became quick actions.",
+    "never": "Never used in this window: {list}.",
+    "never_count": "{unused} of {all} {kind} were never used.",
+    "failed": "Failed or not confirmed more than once: {list}.",
+    "item": "{name} ({count})",
+    "failed_item": "{name} ({bad} of {all})",
+    "kinds": {"tools": "tools", "skills": "skills"},
+}
+
+METRICS_PAGE = {
+    "title": "Usage details",
+    "about": (
+        "So Console's maker can see what gets used and what doesn't in each house, this box counts how often "
+        "each feature, tool, skill and screen is used each day, whether it worked, which model tier answered "
+        "and roughly how long it took. Counts only: nothing you say, no device, room or person's name, and no "
+        "time of day. The names are from fixed lists that are part of Console, so a word of yours can't get in."
+    ),
+    "story": "The summary in words, written on this box from the counts below and nothing else:",
+    "exact": "This is exactly what is sent, byte for byte, the next time Console's relay asks:",
+    "unlike": (
+        "Unlike the labels above, these counts are kept for this house, by day, where Console's operator can "
+        "read them."
+    ),
+    "on": "Usage details: on",
+    "off": "Usage details: off",
+    "off_means": (
+        "Off: this box stops counting these and sends none, and Console's relay deletes the ones it has for "
+        "this house. This month's totals above are still sent."
+    ),
+    "turn_off": "Turn usage details off",
+    "turn_on": "Turn usage details on",
+    "held": "The check on this report failed, so nothing is being sent. That is a fault in Console, not in your house.",
+    "erase": "Erasing Console's data (General) erases these counts here and at the relay.",
+}

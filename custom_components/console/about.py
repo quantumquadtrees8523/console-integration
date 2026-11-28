@@ -83,6 +83,9 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
             "you. Monthly totals (counts by kind and route, and "
             "credits used) go to Console's relay, and so do counts of what kind of thing each request was, as "
             "labels from a fixed list such as lights.on_off, which the relay adds to one total for all houses "
-            "and does not keep for this house; no message, device name or room does."
+            "and does not keep for this house; no message, device name or room does. Usage details (how often each "
+            "feature, tool, skill and screen is used each day and whether it worked, from fixed lists, with a short "
+            "summary in words) also go to the relay, which keeps those for this house; Console settings > What the "
+            "house knows about you shows exactly what is sent and has the switch to stop it."
         ),
     }
