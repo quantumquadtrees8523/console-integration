@@ -462,6 +462,8 @@ async def test_the_card_keeps_one_turn_one_message_and_shows_a_feed_of_chats_to_
     assert '"console/chat/watch"' in script and 'addEventListener("ready"' in script
     assert '"console/chat/feed"' in script and '"console/chat/thread/delete"' in script
     assert '"console/chat/history", thread_id: post.id' in script  # a chat's replies, read when it's opened
-    assert "this._postFor(this._reply, text)" in script and "thread_id: post.id }" in script
+    assert "this._send(text, post)" in script  # a thread's own reply box writes into that chat
+    assert "this._postFor(into || null, text)" in script and "thread_id: post.id }" in script
+    assert 'el("span", "who"' in script and '"Reply"' in script  # drawn as comments: a name on each, Reply under it
     assert '"console/chat/threads"' not in script  # no switcher: the feed is the one history
     assert '"console/suggestions/seen"' in script and "_drawSuggested" in script and "_drawQuick" in script

@@ -1,10 +1,12 @@
 // Console chat card: talk to Console, this home's agent, from a dashboard.
 //
 // The card is one feed of chats, and each chat is a thread inside it (owner, 2026-11-28: "a feed of chats
-// and each chat has its own mini history", like a feed and its comments). What you type starts a new chat
-// at the bottom of the feed. Each chat shows its opening (what was asked, and the reply); Reply under a
-// chat carries on inside it, nested, and only that chat's messages are the model's context. View replies
-// opens a chat's own history in place. Everything is kept on the box (never in this card, never off the
+// and each chat has its own mini history ... like a Facebook comment thread"). It is drawn as comments:
+// each one an avatar, a name and its words in a bubble, with a line under it (when, Reply). What you ask
+// is a top-level comment; Console's answer and everything after are replies indented under it. The box at
+// the bottom starts a new chat. Reply opens a box inside that thread, and what's written there goes into
+// that chat alone: only its messages are the model's context. View more replies opens a chat's own
+// history in place. Everything is kept on the box (never in this card, never off the
 // box) with the work behind every reply: where the request went and why, the model's thinking, each tool
 // it used and what came back. Ten chats at a time from the newest.
 //
@@ -32,31 +34,29 @@ const STYLE = `
   .banner.offline, .banner.off { background: color-mix(in srgb, var(--secondary-text-color, #888) 16%, transparent); }
   .banner.support { background: color-mix(in srgb, var(--warning-color, #ffa600) 26%, transparent); }
   .banner a, .earlier { color: var(--primary-color); cursor: pointer; text-decoration: underline; white-space: nowrap; }
-  .post { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 10px; border-bottom: 1px solid var(--divider-color); }
-  .post:last-child { border-bottom: 0; }
-  .post.on { background: color-mix(in srgb, var(--primary-color) 7%, transparent); border-radius: 12px; margin: 0 -8px; padding: 6px 8px 10px; }
-  .phead { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--secondary-text-color); }
-  .phead .x, .chip .x { border: 0; background: none; color: var(--secondary-text-color); cursor: pointer; font-size: 13px; padding: 0 4px; }
-  .opening, .replies { display: flex; flex-direction: column; gap: 8px; }
-  .replies { margin-left: 12px; padding-left: 10px; border-left: 2px solid var(--divider-color); }
-  .replies .turn { max-width: 96%; }
-  .acts { display: flex; gap: 14px; padding-left: 4px; }
-  .acts button, .replies .earlier, .replying button { font: inherit; font-size: 12px; border: 0; background: none; padding: 2px 0; color: var(--primary-color); cursor: pointer; }
-  .acts .reply { font-weight: 600; }
-  .replying { display: flex; align-items: center; gap: 8px; padding: 6px 16px 0; font-size: 12px; color: var(--secondary-text-color); }
-  .replying span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .post { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
+  .thread { display: flex; flex-direction: column; gap: 6px; margin-left: 40px; }
+  .first, .replies { display: flex; flex-direction: column; gap: 6px; }
+  .view, .replies .earlier { align-self: flex-start; font: inherit; font-size: 13px; font-weight: 600; border: 0; background: none; padding: 2px 0 2px 4px; color: var(--secondary-text-color); cursor: pointer; }
+  .view:hover, .replies .earlier:hover, .foot button:hover { text-decoration: underline; }
+  .av { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 700; text-transform: uppercase;
+        background: color-mix(in srgb, var(--primary-text-color) 16%, transparent); color: var(--primary-text-color); }
+  .it > .av { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .thread .av { width: 24px; height: 24px; font-size: 11px; }
+  .rbox { display: flex; gap: 8px; align-items: center; padding: 0; }
+  .rbox textarea { min-height: 34px; padding: 7px 12px; border-radius: 17px; font-size: 14px; line-height: 18px; background: var(--secondary-background-color); border-color: transparent; }
   .none { padding: 14px; color: var(--secondary-text-color); font-size: 14px; }
   .log { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain;
          user-select: text; -webkit-user-select: text; }
   .top { display: flex; justify-content: center; font-size: 12px; color: var(--secondary-text-color); min-height: 4px; }
   .hello { color: var(--secondary-text-color); font-size: 14px; line-height: 20px; }
-  .turn { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
-  .turn.me { align-self: flex-end; align-items: flex-end; }
-  .turn.it { align-self: flex-start; align-items: stretch; }
-  .msg { padding: 9px 13px; border-radius: 16px; font-size: 15px; line-height: 22px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; }
-  .me .msg { background: var(--primary-color); color: var(--text-primary-color, #fff); border-bottom-right-radius: 5px; white-space: pre-wrap; }
-  .it .msg { background: var(--secondary-background-color); color: var(--primary-text-color); border-bottom-left-radius: 5px; }
-  .it .msg.error { border: 1px solid var(--error-color, #db4437); }
+  .turn { display: flex; gap: 8px; align-items: flex-start; }
+  .cb { min-width: 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+  .bubble { max-width: 100%; padding: 7px 12px; border-radius: 16px; background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .who { display: block; font-size: 13px; font-weight: 700; line-height: 18px; }
+  .msg { font-size: 15px; line-height: 20px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; }
+  .me .msg { white-space: pre-wrap; }
+  .msg.error { color: var(--error-color, #db4437); }
   .msg > :first-child { margin-top: 0; } .msg > :last-child { margin-bottom: 0; }
   .msg p { margin: 0 0 8px; } .msg ul, .msg ol { margin: 0 0 8px; padding-left: 22px; } .msg li { margin: 2px 0; }
   .msg h3, .msg h4 { margin: 10px 0 6px; font-size: 15px; font-weight: 700; }
@@ -67,9 +67,9 @@ const STYLE = `
   .code pre code { background: none; padding: 0; }
   .copy { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-color); cursor: pointer; }
   .code .copy { position: absolute; top: 6px; right: 6px; }
-  .foot { display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--secondary-text-color); padding-left: 6px; }
-  .foot .copy { border: 0; background: none; padding: 0; text-decoration: underline; }
-  details.steps { font-size: 13px; color: var(--secondary-text-color); margin: 0 0 2px 4px; }
+  .foot { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--secondary-text-color); padding-left: 12px; }
+  .foot button, .foot .copy { font: inherit; font-size: 12px; font-weight: 700; border: 0; background: none; padding: 0; color: var(--secondary-text-color); cursor: pointer; border-radius: 0; }
+  details.steps { font-size: 12px; color: var(--secondary-text-color); margin: 0 0 0 12px; align-self: stretch; }
   details.steps summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; padding: 2px 0; }
   details.steps summary::-webkit-details-marker { display: none; }
   details.steps summary::after { content: "\\25BE"; font-size: 11px; }
@@ -248,7 +248,6 @@ class ConsoleChatCard extends HTMLElement {
         <div class="banner" hidden></div>
         <div class="log" role="log" aria-live="polite"><div class="top"></div><div class="hello"></div></div>
         <div class="strip suggested" hidden><div class="row" role="group" aria-label="Suggestions"></div></div>
-        <div class="replying" hidden><span></span><button type="button">New chat instead</button></div>
         <form><textarea rows="1" placeholder="Ask Console" aria-label="Ask Console" enterkeyhint="send"></textarea>
         <button class="send" type="submit">Send</button></form>
         <div class="strip quick" hidden><div class="row" role="group" aria-label="Quick actions"></div></div>
@@ -257,11 +256,9 @@ class ConsoleChatCard extends HTMLElement {
     this._log = root.querySelector(".log");
     this._top = root.querySelector(".top");
     this._hello = root.querySelector(".hello");
-    this._replying = root.querySelector(".replying");
-    this._replying.querySelector("button").addEventListener("click", () => this._setReply(null));
     this._suggestedRow = root.querySelector(".strip.suggested");
     this._quickRow = root.querySelector(".strip.quick");
-    const area = root.querySelector("textarea");
+    const area = root.querySelector("form:not(.rbox) textarea");
     const submit = () => { const text = area.value.trim(); if (text && !this._busy && this._loaded) { area.value = ""; area.style.height = ""; this._send(text); } };
     root.querySelector("form").addEventListener("submit", (event) => { event.preventDefault(); submit(); });
     area.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } });
@@ -376,18 +373,18 @@ class ConsoleChatCard extends HTMLElement {
   async _tap(item) {
     if (this._busy || !this._loaded) return;
     this._busy = true;
-    const seq = this._seq, into = this._reply;
+    const seq = this._seq, into = null;   // a tap under the feed is a new chat
     let done = null, failed = null;
     try { done = await this._ws({ type: "console/suggestions/tap", suggestion_id: item.id, thread_id: into ? into.id : null }); } catch (e) { failed = String(e.message || e); }
     this._busy = false;
     if (done && done.ask) { this._send(done.ask); this._loadSuggested(); return; }   // something to ask: sent like any message
     if (seq !== this._seq) return;
     const post = await this._postFor(into, `Run “${item.name}”`);
-    this._append(post, this._turn("me", `Run “${item.name}”`).node);
+    this._append(post, this._turn("me", `Run “${item.name}”`, { post }));
     if (done) {
       this._name(post, done.thread_id);
-      this._append(post, this._stored({ who: "console", text: done.reply, steps: [{ title: "Ran at home", detail: "A tap on a suggestion: no AI, no internet." }], meta: { route: "local" } }).node);
-    } else this._append(post, this._turn("it", failed, { error: true }).node);
+      this._append(post, this._stored({ who: "console", text: done.reply, steps: [{ title: "Ran at home", detail: "A tap on a suggestion: no AI, no internet." }], meta: { route: "local" } }, post));
+    } else this._append(post, this._turn("it", failed, { error: true, post }));
     this._drawActs(post);
     post.node.scrollIntoView({ block: "nearest" });
     this._loadSuggested();
@@ -400,22 +397,24 @@ class ConsoleChatCard extends HTMLElement {
 
   // --- the feed, and each chat a thread inside it ----------------------------------------------------
 
-  // One chat in the feed: when, its opening, its replies (nested, closed until asked for), Reply.
+  // One chat in the feed, as a comment thread: the ask on top, then, indented under it, Console's answer,
+  // the rest of the replies (closed until asked for) and the box to reply in.
   _post(chat) {
-    const node = el("div", "post"), head = el("div", "phead"), opening = el("div", "opening"), replies = el("div", "replies"), acts = el("div", "acts");
-    const post = { id: chat.id || null, title: chat.title || "", count: 0, node, opening, replies, open: false, from: null };
-    const x = el("button", "x", "✕"); x.type = "button"; x.title = "Delete this chat"; x.setAttribute("aria-label", "Delete this chat");
-    x.addEventListener("click", () => this._delete(post));
-    head.append(el("span", "", chat.made ? ago(chat.made) : "now"), x);
+    const node = el("div", "post"), top = el("div", "top"), thread = el("div", "thread"), first = el("div", "first"), replies = el("div", "replies");
+    const post = { id: chat.id || null, title: chat.title || "", count: 0, node, top, first, replies, open: false, from: null };
     replies.hidden = true;
     post.view = el("button", "view"); post.view.type = "button";
     post.view.addEventListener("click", () => { if (post.open) this._closeReplies(post); else this._openReplies(post); });
-    post.replyButton = el("button", "reply", "Reply"); post.replyButton.type = "button";
-    post.replyButton.addEventListener("click", () => this._setReply(this._reply === post ? null : post));
-    acts.append(post.replyButton, post.view);
-    node.append(head, opening, replies, acts);
-    for (const message of chat.opening || []) opening.appendChild(this._stored(message).node);
-    post.count = chat.count || 0;
+    post.box = el("form", "rbox"); post.box.hidden = true;
+    const area = el("textarea"); area.rows = 1; area.placeholder = "Reply in this thread…"; area.setAttribute("aria-label", "Reply in this thread"); area.enterKeyHint = "send";
+    const submit = () => { const text = area.value.trim(); if (text && !this._busy && this._loaded) { area.value = ""; this._send(text, post); } };
+    post.box.addEventListener("submit", (event) => { event.preventDefault(); submit(); });
+    area.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } if (event.key === "Escape") this._setReply(null); });
+    post.box.append(this._avatar("me"), area);
+    thread.append(first, post.view, replies, post.box);
+    node.append(top, thread);
+    for (const message of chat.opening || []) this._append(post, this._stored(message, post));
+    post.count = chat.count || post.count;
     if (post.id) this._posts.set(post.id, post);
     this._drawActs(post);
     return post;
@@ -424,10 +423,7 @@ class ConsoleChatCard extends HTMLElement {
   _drawActs(post) {
     const more = Math.max(0, post.count - OPENING);
     post.view.hidden = !more;
-    post.view.textContent = post.open ? "Hide replies" : `View ${more} ${more === 1 ? "reply" : "replies"}`;
-    post.replyButton.hidden = !post.id;
-    post.replyButton.textContent = this._reply === post ? "Replying here" : "Reply";
-    post.node.classList.toggle("on", this._reply === post);
+    post.view.textContent = post.open ? "Hide replies" : `View ${more} more ${more === 1 ? "reply" : "replies"}`;
   }
 
   // A chat learns its id from the box when its first turn starts.
@@ -435,13 +431,17 @@ class ConsoleChatCard extends HTMLElement {
     if (!id || post.id === id) return;
     post.id = id;
     this._posts.set(id, post);
-    this._drawActs(post);
   }
 
-  // Put a message into a chat on screen: its opening first, then its replies.
-  _append(post, node) {
-    if (post.count < OPENING) post.opening.appendChild(node);
-    else { post.replies.hidden = false; post.open = true; if (post.from === null) post.from = OPENING; post.replies.appendChild(node); }
+  // Put a comment into a chat on screen: the ask on top, the answer under it, then its replies.
+  _append(post, turn) {
+    if (post.count === 0) {
+      post.top.appendChild(turn.node);
+      const gone = el("button", "", "Delete"); gone.type = "button";
+      gone.addEventListener("click", () => this._delete(post));
+      turn.foot.appendChild(gone);
+    } else if (post.count < OPENING) post.first.appendChild(turn.node);
+    else { post.replies.hidden = false; post.open = true; if (post.from === null) post.from = OPENING; post.replies.appendChild(turn.node); }
     post.count += 1;
   }
 
@@ -482,7 +482,7 @@ class ConsoleChatCard extends HTMLElement {
     if (!page) { if (post.from === null) post.from = OPENING; return; }
     const start = Math.max(page.from, OPENING);   // the opening is already in the feed
     const first = post.replies.firstChild;
-    for (const message of page.messages.slice(start - page.from)) post.replies.insertBefore(this._stored(message).node, first);
+    for (const message of page.messages.slice(start - page.from)) post.replies.insertBefore(this._stored(message, post).node, first);
     if (post.from === null) post.count = page.total;
     post.from = start;
     if (start > OPENING) {
@@ -492,19 +492,14 @@ class ConsoleChatCard extends HTMLElement {
     }
   }
 
-  // Which chat the box under the feed writes into.
+  // Reply: open that thread's own box (one at a time). What's written there goes into that chat alone.
   _setReply(post) {
     const was = this._reply;
-    this._reply = post || null;
-    if (was) this._drawActs(was);
-    const area = this.shadowRoot.querySelector("textarea");
-    this._replying.hidden = !post;
-    area.placeholder = post ? "Reply in this chat" : "Ask Console";
-    if (!post) return;
-    this._replying.querySelector("span").textContent = `Replying in “${post.title || "this chat"}”`;
-    this._drawActs(post);
-    this._openReplies(post);
-    area.focus();
+    this._reply = post && post.id ? post : null;
+    if (was && was !== this._reply) was.box.hidden = true;
+    if (!this._reply) return;
+    post.box.hidden = false;
+    this._openReplies(post).then(() => { post.box.scrollIntoView({ block: "nearest" }); post.box.querySelector("textarea").focus(); });
   }
 
   async _delete(post) {
@@ -549,7 +544,7 @@ class ConsoleChatCard extends HTMLElement {
     const seq = this._seq;
     for (const id of open) if (this._posts.has(id)) await this._openReplies(this._posts.get(id));
     if (seq !== this._seq) return;
-    this._setReply((replying && this._posts.get(replying)) || null);
+    if (replying && this._posts.get(replying)) this._setReply(this._posts.get(replying));
     const working = feed.chats.filter((chat) => chat.working).pop();
     if (working) await this._watch(this._posts.get(working.id));
   }
@@ -586,19 +581,35 @@ class ConsoleChatCard extends HTMLElement {
 
   // --- one message on screen ----------------------------------------------------------------------
 
+  _avatar(who) {
+    const name = who === "me" ? this._me() : "Console";
+    const av = el("div", "av", name.slice(0, 1)); av.setAttribute("aria-hidden", "true");
+    return av;
+  }
+
+  _me() { return (this._hass && this._hass.user && this._hass.user.name) || "You"; }
+
+  // One comment: avatar, then the name and the words in a bubble, and under it when, Reply and Copy.
   _turn(who, text, opts = {}) {
-    const node = el("div", `turn ${who}`);
+    const node = el("div", `turn ${who}`), body = el("div", "cb"), shell = el("div", "bubble");
     const bubble = el("div", `msg${opts.error ? " error" : ""}`);
     if (who === "me") bubble.textContent = text; else markdown(bubble, text);
-    node.appendChild(bubble);
+    shell.append(el("span", "who", who === "me" ? this._me() : "Console"), bubble);
     const foot = el("div", "foot");
-    const turn = { node, bubble, foot, text };
+    foot.appendChild(el("span", "", opts.at ? ago(opts.at) : "just now"));
+    const turn = { node, body, bubble, foot, text };
+    if (opts.post) {
+      const reply = el("button", "", "Reply"); reply.type = "button";
+      reply.addEventListener("click", () => this._setReply(opts.post));
+      foot.appendChild(reply);
+    }
     if (who === "it") {
       const copy = el("button", "copy", "Copy"); copy.type = "button";
       copy.addEventListener("click", () => copyText(turn.text, copy));
       foot.appendChild(copy);
-      node.appendChild(foot);
     }
+    body.append(shell, foot);
+    node.append(this._avatar(who), body);
     return turn;
   }
 
@@ -608,7 +619,7 @@ class ConsoleChatCard extends HTMLElement {
     const steps = el("details", "steps"), summary = el("summary"), list = el("div", "steplist");
     const dot = el("span", "dot"), label = el("span", "", "Working…");
     summary.append(dot, label); steps.append(summary, list);
-    turn.node.insertBefore(steps, turn.bubble);
+    turn.body.appendChild(steps);
     const work = { steps, list, dot, label, count: 0, byKey: new Map(), thinking: null };
     work.add = (cls, title) => { const row = el("div", `step ${cls}`), t = el("div", "t", title), d = el("div", "d"); row.append(t, d); list.appendChild(row); work.count += 1; return { row, t, d }; };
     work.think = (text) => {
@@ -633,9 +644,9 @@ class ConsoleChatCard extends HTMLElement {
   }
 
   // A message as the box keeps it. Console's replies come with their steps.
-  _stored(message) {
-    if (message.who === "you") return this._turn("me", message.text);
-    const turn = this._turn("it", message.text, { error: message.failed });
+  _stored(message, post) {
+    if (message.who === "you") return this._turn("me", message.text, { at: message.at, post });
+    const turn = this._turn("it", message.text, { error: message.failed, at: message.at, post });
     const work = this._work(turn);
     for (const step of message.steps || []) {
       if (step.kind === "think") { work.thinking = null; work.think(step.detail || ""); continue; }
@@ -660,10 +671,10 @@ class ConsoleChatCard extends HTMLElement {
     const send = this.shadowRoot.querySelector("button.send");
     this._busy = true;
     send.disabled = true;
-    const turn = this._turn("it", "");
+    const turn = this._turn("it", "", { post });
     turn.bubble.hidden = true; turn.foot.hidden = true;
     const work = this._work(turn);
-    this._append(post, turn.node);
+    this._append(post, turn);
     turn.node.scrollIntoView({ block: "nearest" });
     const started = performance.now();
     let streamed = "", meta = {}, frame = 0, done = false;
@@ -724,14 +735,14 @@ class ConsoleChatCard extends HTMLElement {
     }
   }
 
-  // What's typed goes into the chat being replied in, or starts a new chat at the bottom of the feed.
-  async _send(text) {
+  // What's typed in a thread's own box goes into that chat; what's typed under the feed starts a new chat.
+  async _send(text, into) {
     if (this._busy || !this._hass) return;
     this._busy = true;   // held from here: opening a chat's replies may take a moment
     const seq = this._seq;
-    const post = await this._postFor(this._reply, text);
+    const post = await this._postFor(into || null, text);
     if (seq !== this._seq) { this._busy = false; return; }
-    this._append(post, this._turn("me", text).node);
+    this._append(post, this._turn("me", text, { post }));
     this._drawActs(post);
     await this._subscribe(this._live(post), { type: "console/chat", text, thread_id: post.id });
   }

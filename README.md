@@ -44,18 +44,20 @@ longer than a key lasts, or the model fails) the person is told so, and step 1 k
 
 ## One feed of chats, each its own thread
 
-The card is one history: a feed of your chats in the order you started them, like a feed and its comments.
+The card is one history, drawn like a comment thread on a social feed (owner, 2026-11-28: "like a
+Facebook comment thread"): every comment has an avatar, a name and its words in a bubble, with a line
+under it (when, **Reply**).
 
-- **What you type starts a new chat** at the bottom of the feed.
-- **Each chat shows its opening**: what you asked and Console's reply, with a line that opens into the work
+- **What you type in the box at the bottom starts a new chat**: a new top-level comment at the bottom of
+  the feed. Console's answer is the first reply, indented under it, with a line that opens into the work
   behind it (where the request went and why, the model's thinking, each tool it used and what came back).
-- **Reply** under a chat carries on inside it. Your replies and Console's are nested under that chat, and
-  **only that chat's messages are given to the model**: nothing from the rest of the feed. The box says
-  which chat you're replying in until you choose **New chat instead**.
-- **View replies** opens a chat's own history in place, the newest fifty first. A reply doesn't move its
-  chat in the feed. Earlier chats load ten at a time when you pull up past the top.
-- Chats are kept on the box only, per signed-in person: the newest 200 chats, 200 messages each. ✕ on a
-  chat deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
+- **Reply** under any comment opens a box inside that thread. What you write there carries on in that
+  chat, nested under it, and **only that chat's messages are given to the model**: nothing from the rest
+  of the feed.
+- **View more replies** opens a chat's own history in place, the newest fifty first. A reply doesn't move
+  its chat in the feed. Earlier chats load ten at a time when you pull up past the top.
+- Chats are kept on the box only, per signed-in person: the newest 200 chats, 200 messages each. **Delete** under
+  a chat's first comment deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
 - A turn runs on the box whoever is watching. If the card reloads, the phone sleeps or the connection
   drops, the reply still lands in its chat, and a card that opens the feed meanwhile picks the turn up as
   it happens. One message is always one turn: nothing is sent again when the connection comes back.
