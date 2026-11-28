@@ -137,6 +137,15 @@ At 80% and at 100% of the month's credits, Home Assistant shows a notification, 
 Companion app gets a push. Each says how much is used and links to the Plan tab. Nothing is throttled;
 at 100% the cloud agent pauses until the 1st, as before, and the house keeps working at home.
 
+## Updates
+
+Console settings has **Update now**: it installs the latest release of each integration HACS manages
+(Console, Sunrise, any other) that has an update waiting, reads each version back, then restarts Home
+Assistant once. Home Assistant itself updates separately. Console's site has the same button for each
+house, and one for every house, which the household allows with **Updates from Console's site**
+(`switch.console_updates`, on unless they turn it off; nothing reaches the house with cloud access off).
+Each run goes in the log under Support mode: who, what went from which version to which, what didn't.
+
 ## What leaves the house
 
 - To the model provider (OpenRouter): the conversation, the tool list and tool results, for requests
@@ -144,6 +153,9 @@ at 100% the cloud agent pauses until the 1st, as before, and the house keeps wor
 - To Console's relay: once in a while, this month's totals. Requests by kind (`control`, `status`,
   `customization`, `setup`, `troubleshooting`, `other`), by route, by agent, how many were done, and
   the spend. No messages, device names, rooms or times of day. Console settings shows the exact payload.
+- To Console's relay, when it asks for the box's status: the versions of Console, Sunrise and Home
+  Assistant, and the name, installed version and latest release of each integration HACS manages, so
+  the site can show which houses have an update waiting.
 
 ## Claude Code plugin
 

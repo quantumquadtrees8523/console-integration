@@ -64,6 +64,20 @@ def support_on(until: datetime) -> str:
     )
 
 
+def updated(by: str, updated: list[dict], failed: list[dict], restarting: bool) -> str:
+    """The log line for an update run (updates.py)."""
+    if not updated and not failed:
+        return f"{by} checked for updates: everything was up to date."
+    parts = [f"{u['name']} {u['from']} → {u['to']}" for u in updated]
+    said = f"{by} updated {', '.join(parts)}." if parts else f"{by} tried to update."
+    if failed:
+        said += " Not updated: " + ", ".join(f"{f['name']} ({f['why']})" for f in failed) + "."
+    return said + (" Home Assistant restarted to load them." if restarting else "")
+
+
+UPDATES_OFF = "Updates from Console's site are turned off for this house."
+
+
 UNLINKED = (
     "This house isn't connected to Console. Its data was erased here. Connect it again in Console settings."
 )

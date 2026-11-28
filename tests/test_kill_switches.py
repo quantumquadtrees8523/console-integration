@@ -101,7 +101,7 @@ async def test_with_cloud_access_off_the_relay_is_refused(hass, console, hass_cl
     refused = await client.post("/api/console/relay/config", json={"plan": {"tier": "free"}})
     assert refused.status == 423 and console.key() is None
     status = await (await client.get("/api/console/relay/status")).json()
-    assert status["switches"] == {"cloud": False, "ai": True}
+    assert status["switches"] == {"cloud": False, "ai": True, "updates": True}
 
 
 async def test_the_old_cloud_agent_switch_is_gone(hass, console):

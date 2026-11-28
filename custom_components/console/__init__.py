@@ -64,6 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             relay_api.NotifyView,
             relay_api.SupportView,
             relay_api.TokenView,
+            relay_api.UpdateView,
             *music_app.VIEWS,
         ):
             hass.http.register_view(view())

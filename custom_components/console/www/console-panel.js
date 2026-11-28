@@ -249,6 +249,15 @@ class ConsolePanel extends HTMLElement {
         ${this._code ? `<pre id="code">${esc(this._code)}</pre>` : ""}
         <p class="soft">${esc(this._backupSaid || "")}</p>` : `<p class="soft">Home Assistant's backups aren't set up on this box.</p>`}
       </section>
+      <section><h2>Updates</h2>
+        <p class="soft">Console, Sunrise and the other integrations installed through HACS. <b>Update now</b> installs the latest release of each one that has an update waiting, then restarts Home Assistant once so they load (a minute or two). Home Assistant itself updates separately.</p>
+        ${(s.updates || []).length ? `<table>${s.updates.map((u) => `<tr><td>${esc(u.name)}</td><td class="soft">${esc(u.version || "?")}${u.waiting ? ` → <b>${esc(u.latest)}</b>` : " (up to date)"}</td></tr>`).join("")}</table>` : `<p class="soft">HACS isn't installed here, or manages nothing.</p>`}
+        ${admin ? `<div class="row"><button class="act" data-do="update-now">Update now</button></div>` : ""}
+        <p class="soft">${esc(this._updateSaid || "")}</p>
+        <p style="margin-top:14px"><b>Updates from Console's site: ${s.switches.updates ? "on" : "off"}</b></p>
+        <p class="soft">On: Console's operator can do the same from Console's site, so this house gets fixes without anyone here pressing anything. Each update is listed under Support mode below. Off: only someone here can update.</p>
+        ${admin ? `<div class="row"><button class="act" data-do="switch" data-entity="switch.console_updates" data-on="${s.switches.updates ? "0" : "1"}">${s.switches.updates ? "Turn updates from Console's site off" : "Turn updates from Console's site on"}</button></div>` : ""}
+      </section>
       <section><h2>Support mode</h2>
         <p class="soft">Off unless you turn it on. While it's on, Console's operator can open this house through Console's site and see what's in it, including the chat history kept on this box, to help you. It turns itself off after 7 days, and everything the operator opens is listed here.</p>
         <p><b>${s.support.on ? `On until ${dayTime(s.support.until)}` : "Off"}</b></p>
@@ -369,6 +378,13 @@ class ConsolePanel extends HTMLElement {
         this._backupSaid = "Downloaded console-recovery-code.txt.";
       }
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
+      else if (what === "update-now") {
+        if (!confirm("Update now? Each integration with an update waiting is installed, then Home Assistant restarts once. This page comes back in a minute or two.")) return;
+        this._updateSaid = "Updating…"; this._draw();
+        const r = await this._ws({ type: "console/update/now" });
+        const did = r.updated.map((u) => `${u.name} ${u.from} → ${u.to}`).join(", ");
+        this._updateSaid = (did ? `Updated ${did}.` : "Everything was up to date.") + (r.failed.length ? ` Not updated: ${r.failed.map((f) => `${f.name} (${f.why})`).join(", ")}.` : "") + (r.restarting ? " Home Assistant is restarting." : "");
+      }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
       else if (what === "feat") {
         if (at.key === "suggestions" && at.on === "1" && !confirm("Turn suggested routines on? The cloud agent will check what the house heard every hour, and look at the whole house on Mondays. Every run uses some of this month's credits. This page shows what they used.")) return;
