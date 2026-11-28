@@ -7,6 +7,9 @@ import re
 from typing import Any
 
 
+PANEL_TITLE = "Console settings"  # the page in Home Assistant's sidebar
+
+
 def _more(plan: dict[str, Any]) -> str:
     contact = plan.get("contact") or "Surya"
     nxt = plan.get("next")
@@ -57,24 +60,23 @@ def support_on(until: datetime) -> str:
     day = f"{until.strftime('%B')} {until.day}"
     return (
         f"Support mode is on until {day}. Console's operator can open this house and see what's in it. "
-        "Turn it off any time on the Console page, under Settings."
+        "Turn it off any time in Console settings."
     )
 
 
 UNLINKED = (
-    "This house isn't connected to Console. Its data was erased here. Connect it again on the Console "
-    "page, under Settings."
+    "This house isn't connected to Console. Its data was erased here. Connect it again in Console settings."
 )
 
 
 CLOUD_OFF = (
     "Cloud access is turned off for this house: it is off Console's relay, so nothing reaches it from "
     "outside and Console's cloud agent is off. Plain commands still run at home. It can only be turned back "
-    "on from inside the house, on the Console page under Settings."
+    "on from inside the house, in Console settings."
 )
 AI_OFF = (
     "AI is turned off for this house: Console's cloud agent, Claude and any other AI agent can't read or "
-    "change anything here. Plain commands still run at home. Turn it back on on the Console page, under Settings."
+    "change anything here. Plain commands still run at home. Turn it back on in Console settings."
 )
 CLOUD_OFF_REPLY = (
     "I couldn't do that one: cloud access is turned off for this house, so I can only do plain commands "
@@ -84,7 +86,15 @@ AI_OFF_REPLY = (
     "I couldn't do that one: AI is turned off for this house, so I can only do plain commands like "
     "\u201cturn off the kitchen lights\u201d."
 )
-AI_OFF_TOOLS = "AI is turned off for this house, on the Console page in Home Assistant. No AI agent can use its tools until someone there turns it back on."
+AGENT_OFF = (
+    "Console's cloud agent is switched off under AI features, so only plain commands like “turn off the kitchen "
+    "lights” are answered. Turn it back on in Console settings, under AI features."
+)
+AGENT_OFF_REPLY = (
+    "I couldn't do that one: Console's cloud agent is switched off under AI features, so I can only do plain "
+    "commands like \u201cturn off the kitchen lights\u201d."
+)
+AI_OFF_TOOLS = "AI is turned off for this house, in Console settings in Home Assistant. No AI agent can use its tools until someone there turns it back on."
 
 
 _SECRET = re.compile(r"(eyJ[\w-]{8,}\.[\w-]+\.[\w-]+|sk-[\w-]{16,}|\b[A-Za-z0-9_-]{40,}\b)")
@@ -116,35 +126,204 @@ def handoff(args: dict[str, Any]) -> str:
         "1. Open Claude Code on a computer on your home network.\n"
         "2. Paste this, as it is:\n\n"
         "```text\n" + "\n".join(block) + "\n```\n\n"
-        "If Claude Code isn't connected to this house yet, the Console page has the steps under Settings."
+        "If Claude Code isn't connected to this house yet, Console settings has the steps."
     )
 
 
-# --- suggested routines --------------------------------------------------------------------------
+# --- suggestions and quick actions (suggestions.py) -------------------------------------------------
 
-SUGGESTIONS_ON_TITLE = "Suggested routines are on"
+SUGGESTIONS_ON_TITLE = "Weekly suggestions are on"
 SUGGESTIONS_ON = (
-    "Console now listens to the house. Every hour its agent checks what the house heard (a door opened, then "
-    "someone switched a light), and every Monday at 3 AM it looks at how the house is used. When something is "
-    "clearly a habit it makes the routine, running at once, and shows it at the top of Home with Keep and Undo. "
-    "One nobody answers in 7 days is removed. Every run uses some of this month's credits, the hourly ones too: "
-    "see what they used on the [Console page](/console), under Where it went. Turn it off any time under Settings."
+    "Every Monday at 3 AM Console's cloud agent looks at how your house is used and suggests a few routines in "
+    "the chat. Each run uses some of this month's credits: see what it used in [Console settings](/console), "
+    "under Where it went. Turn it off any time under AI features."
 )
 SUGGESTIONS_COST = (
-    "Every run uses some of this month's credits: a little each hour, more on Mondays. None runs while three "
-    "routines are waiting for an answer. The Plan tab shows what they used, under Where it went."
+    "Each Monday's run uses some of this month's credits. The Plan tab shows what it used, under Where it went."
 )
 SUGGESTIONS_NO_SUNRISE = "Suggested routines need Sunrise, and it isn't installed."
 SUGGESTION_GONE = "That suggestion isn't here any more."
-SUGGESTION_NOT_KEPT = "That one couldn't be kept just now. It's still running; try again."
+SUGGESTION_DIDNT_RUN = "That suggestion didn't run. Nothing changed."
+
+# Something to ask Console: what fills the chat's suggestions when the house has nothing better to offer.
+ASKS = {
+    "whats_on": "What's on right now?",
+    "routines": "What routines would help here?",
+    "can_do": "What can you do?",
+}
+ALL_LIGHTS_OFF = "Turn off all the lights"
+WHY_ON_ONE = "It's on right now."
+WHY_SCENE = "One of your scenes."
+WHY_USED = "One of the things this house switches most."
+WHY_THING = "Something this house can switch."
+WHY_ASK = "Ask Console."
+
+
+def room_lights(what: str, room: str) -> str:
+    return f"Turn {what} the {room} lights"
+
+
+def switch_thing(what: str, name: str) -> str:
+    return f"Turn {what} {name}"
+
+
+def why_on(count: int, room: str | None = None) -> str:
+    return f"{count} light{' is' if count == 1 else 's are'} on{' there' if room else ''} right now."
+
+
+def why_habit(hour: int, days: int, of: int) -> str:
+    clock = f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}"
+    return f"Usually on around {clock}: {days} of the last {of} days."
+
+
+def _what_changed(things: list[dict[str, Any]]) -> str:
+    shown = [f"{t.get('name') or t.get('id')} is {t.get('now')}" for t in things[:4] if t.get("now") not in (None, "missing")]
+    return (", ".join(shown) + ".") if shown else ""
+
+
+def routine_ran(name: str, things: list[dict[str, Any]]) -> str:
+    return f"Done: “{name}” ran. {_what_changed(things)}".strip()
+
+
+def action_ran(name: str, rows: list[dict[str, Any]]) -> str:
+    """What a tapped suggestion did, from the read-back: only what a thing shows may be called done."""
+    done = [r for r in rows if r.get("result") == "CHECKED"]
+    down = [r for r in rows if r.get("result") == "UNREACHABLE"]
+    unsure = [r for r in rows if r.get("result") == "NOT CONFIRMED"]
+
+    def names(some: list[dict[str, Any]]) -> str:
+        return ", ".join(str(r.get("name") or r.get("id")) for r in some[:4]) + (" and more" if len(some) > 4 else "")
+
+    said = []
+    if done and all(r.get("now") in ("on", "off") for r in done):
+        now = done[0]["now"] if len({r["now"] for r in done}) == 1 else None
+        if len(done) == 1:
+            said.append(f"Done. {names(done)} is {done[0]['now']}.")
+        elif now:
+            said.append(f"Done. {len(done)} things are {now}: {names(done)}.")
+        else:
+            said.append(f"Done. {_what_changed(done)}")
+    elif done:
+        said.append(f"Done: “{name}” ran.")
+    else:
+        said.append(f"“{name}” didn't run.")
+    if unsure:
+        said.append(f"{names(unsure)} didn't show the change.")
+    if down:
+        said.append(f"{names(down)} can't be reached.")
+    return " ".join(said)
+
+
+def action_failed(name: str, why: str) -> str:
+    return f"“{name}” didn't run: {why}. Nothing changed." if why.strip() else f"“{name}” didn't run: you aren't allowed to switch that. Nothing changed."
+
+
+def suggestion_progress(taps: int, days: int, need_taps: int, need_days: int, promoted: bool, was_quick: bool) -> str:
+    """What a tap did for a suggestion's standing, in a few words. Nothing for a quick action: it's already one."""
+    if promoted:
+        return "You keep using this one, so it's a quick action now: it stays under the chat."
+    if was_quick:
+        return ""
+    if taps < need_taps:
+        left = need_taps - taps
+        return f"Use it {left} more time{'s' if left != 1 else ''} and it stays under the chat as a quick action."
+    if days < need_days:
+        return "Use it on another day and it stays under the chat as a quick action."
+    return ""
+
+
+def suggestion_tapped(name: str) -> str:
+    return f"Run \u201c{name}\u201d"
 
 
 def suggestion_kept(name: str) -> str:
-    return f"Kept “{name}”. It's an ordinary routine now: change or remove it under Settings → Automations."
+    return (
+        f"“{name}” runs by itself from now on. To take it back, say “undo that routine” or remove it under "
+        "Settings → Automations."
+    )
 
 
 def suggestion_dismissed(name: str) -> str:
-    return f"Undone: “{name}” is removed. I won't suggest it again."
+    return f"Removed “{name}”. I won't suggest it again."
+
+
+TAP_STEP = ("Ran at home", "A tap on a suggestion: no AI, no internet.")
+CHAT_BUSY = "Console is still answering in this chat. Wait for it to finish, or start a new chat."
+
+
+# --- AI features (features.py): what each is for, what it tends to cost, what off means ---------------
+
+FEATURES_ABOUT = (
+    "Each thing Console does with AI has its own switch here. One credit is one cent of AI use. What a feature "
+    "tends to cost is a guide; what it used this month is counted on this box."
+)
+COST_LEVELS = {"none": "Free", "low": "Low", "medium": "Medium", "high": "High"}
+FEATURES = {
+    "agent": {
+        "name": "Cloud agent in chat, voice and Assist",
+        "what": (
+            "Answers what Home Assistant's own agent can't: questions about the house, requests that take several "
+            "steps, music, routines and dashboards. Plain commands like “turn off the kitchen lights” are tried at "
+            "home first and cost nothing."
+        ),
+        "cost": (
+            "Low for each request, and it adds up with use: about a twentieth of a credit for a plain request, a few "
+            "tenths for a long one that takes several steps. This is where most of a month's credits go."
+        ),
+        "off": (
+            "Off: only plain commands are answered. Anything else gets a reply saying the cloud agent is switched "
+            "off. Claude through the connector isn't affected."
+        ),
+    },
+    "pro": {
+        "name": "Stronger model for hard requests",
+        "what": (
+            "When the first model fails, or says a request needs careful multi-step work, a stronger and slower "
+            "model starts the request again."
+        ),
+        "cost": (
+            "High for each request it takes, and rare: the stronger model costs more for the same words, and the "
+            "first model's attempt is paid for too."
+        ),
+        "off": (
+            "Off: the first model handles everything by itself. A request it can't finish ends with a plain "
+            "“I didn't finish that” instead of being tried again."
+        ),
+    },
+    "suggestions": {
+        "name": "Weekly suggested routines",
+        "what": (
+            "Every Monday at 3 AM the cloud agent reads how the house was used and suggests up to 3 routines. Each "
+            "is a real automation, switched off, that shows as a suggestion in the chat."
+        ),
+        "cost": "Medium, once a week: one long request that takes several steps.",
+        "off": (
+            "Off: the chat still has its suggestions, made at home for free. Only the routines the cloud agent "
+            "writes stop arriving."
+        ),
+    },
+    "style": {
+        "name": "Weekly reply style",
+        "what": (
+            "Every Sunday morning the cloud agent rereads how each person writes to it and updates a note, so its "
+            "replies keep matching them: short when you're short, casual when you're casual."
+        ),
+        "cost": (
+            "Medium, once a week for each person with enough chat: one long request that reads up to 200 of their "
+            "own messages."
+        ),
+        "off": "Off: the note it already has is still followed. It just isn't updated.",
+    },
+    "chips": {
+        "name": "Suggestions and quick actions in chat",
+        "what": (
+            "Three things to tap in the chat, made on this box from what's on and how the house is used. The ones "
+            "you keep using stay under the chat as quick actions."
+        ),
+        "cost": "Free. They're made at home with no AI, and a tap runs at home.",
+        "off": "Off: the chat shows no suggestions and no quick actions. Nothing is forgotten; they're back when this is on.",
+    },
+}
 
 
 # --- usage notifications (alerts.py) --------------------------------------------------------------

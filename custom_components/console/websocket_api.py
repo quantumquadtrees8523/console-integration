@@ -1,4 +1,4 @@
-"""What the chat card and the Console page ask over Home Assistant's WebSocket.
+"""What the chat card and Console settings ask over Home Assistant's WebSocket.
 
 Reading is for anyone signed in to Home Assistant. Changing or deleting anything is for administrators.
 """
@@ -13,9 +13,13 @@ import probatio as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import backups, dashboard, knows, suggestions, wipe, wording
-from .const import DOMAIN, PATH_CHAT
+from . import backups, dashboard, features, knows, suggestions, wipe, wording
+from .const import DOMAIN, PATH_CHAT, ROUTE_LOCAL
+from .history import new_id
 from .status import status
+from .trail import LiveTurn
+
+EARLIER = 20  # messages of a thread given to a model that starts fresh on it (after a restart, or a long pause)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,13 +43,20 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_backup_code,
         ws_backup_now,
         ws_chat,
+        ws_chat_watch,
+        ws_chat_threads,
         ws_chat_history,
+        ws_chat_thread_delete,
         ws_chat_clear,
         ws_suggestions,
         ws_suggestions_set,
         ws_suggestions_run,
+        ws_suggestions_seen,
+        ws_suggestion_tap,
         ws_suggestion_keep,
         ws_suggestion_dismiss,
+        ws_features,
+        ws_features_set,
         ws_usage_paths,
     ):
         websocket_api.async_register_command(hass, command)
@@ -208,20 +219,30 @@ async def ws_backup_now(hass: HomeAssistant, connection: websocket_api.ActiveCon
         connection.send_error(msg["id"], "failed", str(error))
 
 
+def _thread_for(data, user_id: str, asked: str | None) -> str:
+    """The thread a message goes into: the one asked for when it is this person's own (or nobody's yet),
+    else a new one. A thread's id is its conversation's id, so nobody can join another person's."""
+    if asked and all(thread["id"] != asked for other, threads in data.history.people.items() if other != user_id for thread in threads):
+        return asked
+    return new_id()
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "console/chat",
         vol.Required("text"): str,
-        vol.Optional("conversation_id"): vol.Any(str, None),
-        vol.Optional("earlier", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=40)),
+        vol.Optional("thread_id"): vol.Any(str, None),
+        vol.Optional("conversation_id"): vol.Any(str, None),  # what the card before threads sent
+        vol.Optional("earlier", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=40)),  # the same; not used
     }
 )
 @websocket_api.async_response
 async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """One turn with Console's agent, told as it happens. The answer to the command is the conversation's
-    id; then events follow (trail.py): steps, thinking, pieces of the reply, and at last `done` with the
-    whole reply. What was said goes into this person's chat history on the box."""
-    import secrets  # noqa: PLC0415
+    """One turn with Console's agent in one of this person's chats, told as it happens. The answer to the
+    command is the thread's id; then events follow (trail.py): steps, thinking, pieces of the reply, and at
+    last `done` with the whole reply. What was said, and the steps behind the reply, go into that thread on
+    the box. The turn carries on if the card goes away: a card that opens the thread meanwhile watches it
+    (console/chat/watch), and one that opens it afterwards finds the reply there."""
     import time  # noqa: PLC0415
 
     from homeassistant.components import conversation  # noqa: PLC0415
@@ -229,84 +250,137 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     data = hass.data[DOMAIN]
     user_id = connection.user.id
     text = msg["text"].strip()
-    conversation_id = msg.get("conversation_id") or f"console-{secrets.token_hex(8)}"
+    thread_id = _thread_for(data, user_id, msg.get("thread_id") or msg.get("conversation_id"))
 
     def send(event: dict[str, Any]) -> None:
         connection.send_message(websocket_api.event_message(msg["id"], event))
 
-    connection.subscriptions[msg["id"]] = lambda: data.streams.pop(conversation_id, None)
-    connection.send_result(msg["id"], {"conversation_id": conversation_id})
-    if not text:
-        send({"kind": "done", "reply": "", "conversation_id": conversation_id, "error": True})
+    if thread_id in data.live:
+        connection.send_error(msg["id"], "busy", wording.CHAT_BUSY)
         return
-    if msg["earlier"]:
-        data.earlier[conversation_id] = data.history.last(user_id, msg["earlier"])
-    data.streams[conversation_id] = send
-    data.history.add(user_id, "you", text)
+    live = data.live[thread_id] = LiveTurn(user_id)
+    live.attach(send)
+    connection.subscriptions[msg["id"]] = lambda: live.detach(send)
+    connection.send_result(msg["id"], {"thread_id": thread_id, "conversation_id": thread_id})
+    live.emit({"kind": "thread", "thread_id": thread_id})  # first, so a card knows which chat this is before anything else
+    if not text:
+        data.live.pop(thread_id, None)
+        send({"kind": "done", "reply": "", "thread_id": thread_id, "conversation_id": thread_id, "error": True})
+        return
+    data.earlier[thread_id] = data.history.context(user_id, thread_id, EARLIER)
+    data.streams[thread_id] = live.emit
+    data.history.add(user_id, "you", text, thread_id)
     started = time.monotonic()
     try:
         context = connection.context(msg)
         data.via[context.id] = PATH_CHAT
         result = await conversation.async_converse(
-            hass, text, conversation_id, context, hass.config.language, agent_id="conversation.console"
+            hass, text, thread_id, context, hass.config.language, agent_id="conversation.console"
         )
         speech = (result.response.speech.get("plain") or {}).get("speech") or ""
         failed = result.response.response_type.value == "error"
-        conversation_id_now = result.conversation_id or conversation_id
     except Exception as error:  # noqa: BLE001 (whatever went wrong, the card must hear the end of the turn)
-        speech, failed, conversation_id_now = wording.MODEL_FAILED_REPLY, True, conversation_id
-        hass.data[DOMAIN].streams.pop(conversation_id, None)
+        speech, failed = wording.MODEL_FAILED_REPLY, True
         _LOGGER.warning("Console: a chat turn failed (%s)", type(error).__name__)
     finally:
-        data.streams.pop(conversation_id, None)
-        data.earlier.pop(conversation_id, None)
+        data.streams.pop(thread_id, None)
+        data.earlier.pop(thread_id, None)
+        data.live.pop(thread_id, None)
         if "context" in locals():
             data.via.pop(context.id, None)
-    data.history.add(user_id, "console", speech, **({"failed": True} if failed else {}))
-    send(
-        {
-            "kind": "done",
-            "reply": speech,
-            "conversation_id": conversation_id_now,
-            "error": failed,
-            "ms": round((time.monotonic() - started) * 1000),
-        }
-    )
+    if not speech:
+        speech, failed = wording.MODEL_FAILED_REPLY, True
+    ms = round((time.monotonic() - started) * 1000)
+    kept = live.kept
+    data.history.add(
+        user_id, "console", speech, thread_id,
+        failed=failed, steps=kept.steps, meta={k: kept.meta.get(k) for k in ("route", "cost_usd") if k in kept.meta} | {"ms": ms},
+    )  # fmt: skip
+    live.emit({"kind": "done", "reply": speech, "thread_id": thread_id, "conversation_id": thread_id, "error": failed, "ms": ms})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/watch", vol.Required("thread_id"): str})
+@callback
+def ws_chat_watch(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Watch the turn running in one of this person's chats: everything it has done so far, then the
+    rest, ending with `done`. The answer says whether a turn is running at all; when none is, one `gone`
+    event follows, so a card that was waiting reads the thread again instead."""
+    live = hass.data[DOMAIN].live.get(msg["thread_id"])
+
+    def send(event: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], event))
+
+    if live is None or live.user_id != connection.user.id:
+        connection.send_result(msg["id"], {"working": False})
+        send({"kind": "gone"})  # the turn ended a moment ago: the reply is in the thread
+        return
+
+    connection.subscriptions[msg["id"]] = lambda: live.detach(send)
+    connection.send_result(msg["id"], {"working": True})
+    live.attach(send)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/threads"})
+@callback
+def ws_chat_threads(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """This person's chats, the one used last first."""
+    data = hass.data[DOMAIN]
+    rows = data.history.threads(connection.user.id)
+    for row in rows:
+        row["working"] = row["id"] in data.live
+    connection.send_result(msg["id"], {"threads": rows})
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "console/chat/history",
+        vol.Optional("thread_id"): vol.Any(str, None),
         vol.Optional("before"): vol.Any(vol.Coerce(int), None),
         vol.Optional("limit", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
     }
 )
 @callback
 def ws_chat_history(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """This person's earlier chat messages, a page at a time, newest page first."""
-    history = hass.data[DOMAIN].history
-    connection.send_result(msg["id"], history.page(connection.user.id, msg.get("before"), msg["limit"]))
+    """One of this person's chats, a page at a time, newest page first: what was said, and with each of
+    Console's replies the steps behind it. With no thread named: the chat they used last. `working` says a
+    turn is running in it right now (watch it with console/chat/watch)."""
+    data = hass.data[DOMAIN]
+    page = data.history.page(connection.user.id, msg.get("thread_id"), msg.get("before"), msg["limit"])
+    live = data.live.get(page["thread_id"])
+    connection.send_result(msg["id"], page | {"working": bool(live and live.user_id == connection.user.id)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/thread/delete", vol.Required("thread_id"): str})
+@callback
+def ws_chat_thread_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Delete one of this person's chats from the box."""
+    connection.send_result(msg["id"], {"deleted": hass.data[DOMAIN].history.delete(connection.user.id, msg["thread_id"])})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/chat/clear"})
 @callback
 def ws_chat_clear(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Delete this person's chat history from the box."""
+    """Delete all of this person's chats from the box."""
     connection.send_result(msg["id"], {"deleted": hass.data[DOMAIN].history.clear(connection.user.id)})
 
 
-# --- suggested routines (suggestions.py) ----------------------------------------------------------
+# --- suggestions and quick actions (suggestions.py) -------------------------------------------------
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/suggestions"})
-@callback
-def ws_suggestions(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """The suggested routines waiting for Keep or Undo in the chat card, the setting, and the last run."""
+@websocket_api.async_response
+async def ws_suggestions(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """What the chat offers right now (`suggested`, always three, and `quick`), and for the settings
+    page the suggested routines, the weekly run's setting and its last run."""
     data = hass.data[DOMAIN]
-    answer = data.suggestions.listing()
-    if data.cloud_state() in ("ai_off", "cloud_off") or not answer["available"]:
-        answer["items"] = []  # nothing to tap: the tools behind them are off or missing
-    connection.send_result(msg["id"], answer | {"cost_note": wording.SUGGESTIONS_COST, "is_admin": connection.user.is_admin})
+    routines = data.cloud_state() not in ("ai_off", "cloud_off")  # the tools behind a suggested routine are off
+    answer = await data.suggestions.listing(admin=connection.user.is_admin, routines=routines)
+    if not data.feature(features.CHIPS):
+        answer["suggested"], answer["quick"] = [], []
+    connection.send_result(
+        msg["id"],
+        answer | {"cost_note": wording.SUGGESTIONS_COST, "is_admin": connection.user.is_admin, "shown": data.feature(features.CHIPS)},
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/suggestions/set", vol.Required("on"): bool})
@@ -320,18 +394,47 @@ def ws_suggestions_set(hass: HomeAssistant, connection: websocket_api.ActiveConn
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_suggestions_run(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Run the weekly look at the house now (an administrator asked, so it runs even with the setting off)."""
+    """Run the weekly suggestions now (an administrator asked, so it runs even with the setting off)."""
     try:
         connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.run(force=True))
     except suggestions.Refused as error:
         connection.send_error(msg["id"], "refused", str(error))
 
 
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/seen", vol.Required("ids"): [str]})
+@websocket_api.async_response
+async def ws_suggestions_seen(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The chat showed these suggestions to someone. One seen a few times and never tapped is discarded."""
+    connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.seen(msg["ids"][:12]))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "console/suggestions/tap", vol.Required("suggestion_id"): str, vol.Optional("thread_id"): vol.Any(str, None)}
+)
+@websocket_api.async_response
+async def ws_suggestion_tap(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Run a suggestion or a quick action once, as the person who tapped it, and put it in their chat.
+    Something to ask comes back as words (`ask`) for the card to send like any message."""
+    data = hass.data[DOMAIN]
+    user_id = connection.user.id
+    try:
+        done = await data.suggestions.tap(msg["suggestion_id"], user_id)
+    except suggestions.Refused as error:
+        connection.send_error(msg["id"], "refused", str(error))
+        return
+    if done["kind"] != "ask":
+        thread_id = data.history.add(user_id, "you", wording.suggestion_tapped(done["name"]), _thread_for(data, user_id, msg.get("thread_id")))
+        title, detail = wording.TAP_STEP
+        data.history.add(user_id, "console", done["reply"], thread_id, steps=[{"title": title, "detail": detail}], meta={"route": ROUTE_LOCAL})
+        done["thread_id"] = thread_id
+    connection.send_result(msg["id"], done)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "console/suggestions/keep", vol.Required("suggestion_id"): str})
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_suggestion_keep(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Keep a suggestion: it's already running; from here on it's an ordinary routine."""
+    """Let a suggested routine run by itself from now on."""
     try:
         connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.keep(msg["suggestion_id"], connection.user.id))
     except suggestions.Refused as error:
@@ -346,6 +449,26 @@ async def ws_suggestion_dismiss(hass: HomeAssistant, connection: websocket_api.A
         connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.dismiss(msg["suggestion_id"], connection.user.id))
     except suggestions.Refused as error:
         connection.send_error(msg["id"], "refused", str(error))
+
+
+# --- AI features (features.py) ----------------------------------------------------------------------
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/features"})
+@callback
+def ws_features(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Each AI feature: what it's for, what it tends to cost, what it used this month, and whether it's on."""
+    connection.send_result(msg["id"], features.listing(hass, hass.data[DOMAIN]) | {"is_admin": connection.user.is_admin})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "console/features/set", vol.Required("feature"): vol.In(list(features.BY_KEY)), vol.Required("on"): bool}
+)
+@websocket_api.require_admin
+@callback
+def ws_features_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    data = hass.data[DOMAIN]
+    connection.send_result(msg["id"], {"feature": msg["feature"], "on": features.set_on(data, msg["feature"], msg["on"])})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/usage/paths"})

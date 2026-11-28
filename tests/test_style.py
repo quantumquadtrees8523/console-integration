@@ -18,11 +18,12 @@ from .conftest import ask, link
 def chat(console, user_id: str, n: int, *, start: datetime | None = None) -> None:
     """n exchanges for one person: their message, then Console's reply."""
     start = start or datetime.now(UTC) - timedelta(hours=n)
-    mine = console.history.people.setdefault(user_id, [])
+    mine = {"id": f"console-{user_id}", "title": "A chat", "made": start.isoformat(), "at": start.isoformat(), "messages": []}
+    console.history.people.setdefault(user_id, []).append(mine)
     for i in range(n):
         at = (start + timedelta(hours=i)).isoformat()
-        mine.append({"at": at, "who": "you", "text": f"{user_id} says {i}"})
-        mine.append({"at": at, "who": "console", "text": f"reply {i}"})
+        mine["messages"].append({"at": at, "who": "you", "text": f"{user_id} says {i}"})
+        mine["messages"].append({"at": at, "who": "console", "text": f"reply {i}"})
 
 
 async def read(hass, user_id: str | None, **args):

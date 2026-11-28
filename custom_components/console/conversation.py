@@ -7,7 +7,8 @@ fails) the person is told so plainly and the house keeps working on the local ag
 
 While a turn runs, the chat card is told what is happening as it happens (trail.py): where the request
 went and why, the model's thinking, each tool it used and what came back, a hand-up to the stronger
-model. None of that is kept: a turn leaves one route and one label in this month's counts.
+model. A chat turn's steps are kept with its reply in that person's chat history on the box; a turn
+leaves one route and one label, and nothing that was said, in this month's counts.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.json import json_dumps
 
-from . import openrouter, router, tools, topics, wording
+from . import features, openrouter, router, tools, topics, wording
 from .const import (
     AGENT_NAME,
     DOMAIN,
@@ -41,11 +42,9 @@ from .const import (
     MODEL_PRO,
     PATH_ASSIST,
     PATH_AUTOMATIONS,
-    PATH_SUGGESTIONS,
     PATH_VOICE,
     ROUTE_FALLBACK,
     ROUTE_FAST,
-    ROUTE_FULL,
     ROUTE_LOCAL,
     ROUTE_PRO,
 )
@@ -299,6 +298,9 @@ class ConsoleAgent(conversation.ConversationEntity):
             words, why = blocked[state]
             trail.step("The cloud agent wasn't used", why)
             return self._say(user_input, chat_log, words, ROUTE_FALLBACK, "other", False)
+        if PATH.get() not in features.OWN_SWITCH and not self.data.feature(features.AGENT):
+            trail.step("The cloud agent wasn't used", "It is switched off under AI features")
+            return self._say(user_input, chat_log, wording.AGENT_OFF_REPLY, ROUTE_FALLBACK, "other", False)
         inference = self.data.key()
         if inference is None:
             trail.step("The cloud agent wasn't used", "This house has no cloud-agent key right now")
@@ -320,28 +322,22 @@ class ConsoleAgent(conversation.ConversationEntity):
             chat_log.content[0] = conversation.SystemContent(content=system.content + devices_block(self.hass))
 
         route, effort = router.first_route(user_input.text)
-        # A suggestions run is Flash with thinking off, and never Pro (owner, 2026-11-28: "made using the flash
-        # model never reasoning"). It keeps the full tool rounds: the skill reads memory, usage and the routines.
-        unattended = PATH.get() == PATH_SUGGESTIONS
-        if unattended:
-            route, effort = ROUTE_FULL, EFFORT_FAST
         turn = Turn(route=route, text=user_input.text)
         trail.step(
             "Sent to the cloud agent",
-            "DeepSeek V4.1 Flash, thinking off: suggestions never use thinking or the stronger model."
-            if unattended
-            else "DeepSeek V4.1 Flash, thinking off: this reads as a plain command."
+            "DeepSeek V4.1 Flash, thinking off: this reads as a plain command."
             if effort == EFFORT_FAST
             else "DeepSeek V4.1 Flash, with a little thinking: this isn't a plain command.",
         )
         keep = len(chat_log.content)
         began = time.time()
+        stronger = self.data.feature(features.PRO)
         try:
             try:
-                await self._run(chat_log, inference, MODEL_FLASH, effort, turn, trail, escalate=route != ROUTE_FAST and not unattended)
+                await self._run(chat_log, inference, MODEL_FLASH, effort, turn, trail, escalate=stronger and route != ROUTE_FAST)
             except (openrouter.ModelError, Escalate) as why:
-                if unattended:
-                    raise openrouter.ModelError(f"the suggestions run failed on Flash: {why}") from why
+                if not stronger:  # the stronger model is switched off under AI features: this is where it ends
+                    raise openrouter.ModelError(f"no stronger model to hand to ({why})") from why
                 # Flash failed or handed it up: start the turn again on Pro.
                 _LOGGER.info("Console: Flash gave the turn to Pro (%s)", type(why).__name__)
                 del chat_log.content[keep:]
@@ -375,7 +371,11 @@ class ConsoleAgent(conversation.ConversationEntity):
             _LOGGER.warning("Console: the cloud agent failed (%s)", why)
             del chat_log.content[keep:]
             trail.reset()
-            trail.step("The cloud agent failed", "Both models gave up on this request", ok=False)
+            trail.step(
+                "The cloud agent failed",
+                "Both models gave up on this request" if stronger else "The model gave up on this request, and the stronger one is switched off",
+                ok=False,
+            )
             return self._say(user_input, chat_log, wording.MODEL_FAILED_REPLY, turn.route, "other", False)
         finally:
             self.data.others.mark_own(began, time.time())
@@ -391,8 +391,8 @@ class ConsoleAgent(conversation.ConversationEntity):
         return conversation.async_get_result_from_chat_log(user_input, chat_log)
 
     def _earlier(self, chat_log: conversation.ChatLog) -> None:
-        """A conversation picked up after a reload: give the model the earlier messages the person has
-        on screen, once, at the start of a fresh chat log."""
+        """A chat picked up where Home Assistant no longer remembers it (a restart, or a long pause):
+        give the model the thread's last messages, once, at the start of a fresh chat log."""
         earlier = self.data.earlier.pop(chat_log.conversation_id, None)
         if not earlier or len(chat_log.content) > 2:
             return
@@ -527,7 +527,7 @@ class ConsoleAgent(conversation.ConversationEntity):
             )
             turn.model_calls += 1
             turn.cost_usd += done.cost_usd
-            self.data.add_spend(done.cost_usd)
+            self.data.add_spend(done.cost_usd, model=model)
             if done.thinking and not trail.live:
                 trail.thinking(done.thinking)
             calls: list[llm.ToolInput] = []

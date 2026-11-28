@@ -74,7 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass,
             frontend_url_path=PANEL_URL,
             webcomponent_name="console-panel",
-            sidebar_title="Console",
+            sidebar_title=wording.PANEL_TITLE,
             sidebar_icon="mdi:home-heart",
             module_url=PANEL_JS,
             require_admin=False,
@@ -121,12 +121,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await dashboard.ensure(hass, data, force=bool(call.data.get("force", True)))
 
     hass.services.async_register(DOMAIN, "rebuild_dashboard", rebuild)
-
-    async def suggest_routines(call: ServiceCall) -> None:
-        """The house asks Console to look for routines now (suggestions.py): what it heard, or the whole house."""
-        await data.suggestions.run(heard=bool(call.data.get("heard", True)))
-
-    hass.services.async_register(DOMAIN, "suggest_routines", suggest_routines)
     return True
 
 

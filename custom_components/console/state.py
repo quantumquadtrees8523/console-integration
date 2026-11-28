@@ -50,6 +50,7 @@ def _empty_month() -> dict[str, Any]:
         "by_category": dict.fromkeys(CATEGORIES, 0),
         "by_agent": {},
         "by_path": {},  # path -> {"turns", "spend_usd"}: shown on the Plan tab, not sent to the relay
+        "by_model": {},  # model -> {"calls", "spend_usd"}: shown under AI features, not sent to the relay
     }
 
 
@@ -73,8 +74,10 @@ def _fresh() -> dict[str, Any]:
         # What kind of thing each request was (topics.py), by month, not yet sent; and the batch being
         # sent, kept unchanged until the relay says it was counted.
         "topics": {"pending": {}, "sending": None},
-        "suggestions": {"on": False, "items": [], "never": [], "kept": [], "last_run": None, "counts": {}},  # suggestions.py
+        # suggestions.py
+        "suggestions": {"on": False, "items": [], "home": {}, "rest": {}, "never": [], "kept": [], "last_run": None, "counts": {}},
         "style": {"on": True, "last_run": None},  # style.py
+        "features": {},  # features.py: the AI features switched away from their defaults
     }
 
 
@@ -87,9 +90,11 @@ class ConsoleData:
         self.data: dict[str, Any] = _fresh()
         self.now = now or (lambda: datetime.now(UTC))
         self._listeners: list[Callable[[], None]] = []
-        # While a chat card waits on a turn: where to send that conversation's trail, and the earlier
-        # messages it has on screen. Held in memory for the length of the turn only.
+        # While a chat turn runs: where to send that conversation's trail, the turn itself (for a card
+        # that opens the chat meanwhile), and the thread's earlier messages for a model starting fresh.
+        # Held in memory for the length of the turn only.
         self.streams: dict[str, Callable[[dict[str, Any]], None]] = {}
+        self.live: dict[str, Any] = {}  # thread id -> trail.LiveTurn
         self.earlier: dict[str, list[dict[str, Any]]] = {}
         # Requests whose path the caller knows (the chat card, the suggestions run), by context id, for one turn.
         self.via: dict[str, str] = {}
@@ -114,11 +119,15 @@ class ConsoleData:
         return lambda: self._listeners.remove(listener)
 
     async def async_erase(self) -> None:
-        """Forget everything Console keeps (the wipe's first level). The kill switches stay as they
-        were: erasing data must never turn AI back on."""
+        """Forget everything Console keeps (the wipe's first level). The kill switches and the AI
+        features stay as they were: erasing data must never turn AI, or a use of it, back on."""
         switches = dict(self.data.get("switches") or {})
+        features = dict(self.data.get("features") or {})
+        style_on = bool((self.data.get("style") or {}).get("on", True))
         self.data = _fresh()
         self.data["switches"].update(switches)
+        self.data["features"] = features
+        self.data["style"]["on"] = style_on
         await self._store.async_remove()
         for listener in list(self._listeners):
             listener()
@@ -183,6 +192,12 @@ class ConsoleData:
         self.data.setdefault("switches", {"cloud": True, "ai": True})[key] = bool(on)
         self.changed()
 
+    def feature(self, key: str) -> bool:
+        """Whether one of the AI features is on (features.py)."""
+        from . import features  # noqa: PLC0415
+
+        return features.is_on(self, key)
+
     def cloud_state(self) -> str:
         """ai_off or cloud_off (a kill switch is off), ok, near_limit, over_limit, or not_linked (no
         usable key: never linked, or the relay has been out of reach for longer than a key lasts)."""
@@ -201,8 +216,12 @@ class ConsoleData:
         return "ok"
 
     @callback
-    def add_spend(self, usd: float, path: str | None = None) -> None:
+    def add_spend(self, usd: float, path: str | None = None, model: str | None = None) -> None:
         self.month()["spend_usd"] = round(float(self.month()["spend_usd"]) + max(usd, 0.0), 6)
+        if model:
+            row = self.month().setdefault("by_model", {}).setdefault(model, {"calls": 0, "spend_usd": 0.0})
+            row["calls"] += 1
+            row["spend_usd"] = round(float(row["spend_usd"]) + max(usd, 0.0), 6)
         if path := path or PATH.get():
             row = self._path_row(path)
             row["spend_usd"] = round(float(row["spend_usd"]) + max(usd, 0.0), 6)

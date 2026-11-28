@@ -2,7 +2,9 @@
 
 A turn's trail is a list of small events: a step (where the request went and why, a tool being used and
 what came back, a hand-up to the stronger model), a piece of the model's thinking, a piece of its reply.
-They go to the one card that asked and nowhere else: nothing here is stored or logged.
+They go to the cards showing that chat, and the steps are kept with the reply in that person's chat
+history on the box (history.py), so the work is still in the thread when it is opened again. Nothing
+here is logged, and none of it is in Console's store or anything the relay reads.
 """
 
 from __future__ import annotations
@@ -12,6 +14,8 @@ import json
 from typing import Any
 
 DETAIL_MAX = 600
+STEPS_KEPT = 40  # steps kept with one reply
+THINKING_KEPT = 2000  # characters of one stretch of thinking kept with a reply
 
 
 class Trail:
@@ -138,3 +142,74 @@ def summary(result: Any) -> str:
     except (TypeError, ValueError):
         text = str(result)
     return text if len(text) <= DETAIL_MAX else text[: DETAIL_MAX - 1] + "…"
+
+
+class Kept:
+    """A turn's trail boiled down to what is kept with the reply: its steps in order, and the turn's facts."""
+
+    def __init__(self) -> None:
+        self.steps: list[dict[str, Any]] = []
+        self.meta: dict[str, Any] = {}
+        self._by_key: dict[Any, dict[str, Any]] = {}
+        self._thinking: dict[str, Any] | None = None
+
+    def _add(self, step: dict[str, Any]) -> dict[str, Any]:
+        if len(self.steps) < STEPS_KEPT:
+            self.steps.append(step)
+        return step
+
+    def feed(self, event: dict[str, Any]) -> None:
+        kind = event.get("kind")
+        if kind == "thinking":
+            if self._thinking is None:
+                self._thinking = self._add({"kind": "think", "title": "Thinking", "detail": ""})
+            self._thinking["detail"] = (self._thinking["detail"] + str(event.get("text") or ""))[:THINKING_KEPT]
+            return
+        if kind in ("step", "said", "text"):
+            self._thinking = None  # the next thinking is a new stretch
+        if kind == "step":
+            step = self._by_key.get(event.get("key"))
+            if step is None:
+                step = self._by_key[event.get("key")] = self._add({"title": event.get("title") or "Step", "detail": event.get("detail") or ""})
+            if event.get("result"):
+                step["result"] = str(event["result"])[:DETAIL_MAX]
+            if event.get("state") == "failed":
+                step["failed"] = True
+        elif kind == "said":
+            self._add({"title": "Said", "detail": str(event.get("text") or "")[:DETAIL_MAX]})
+        elif kind == "meta":
+            self.meta = {k: v for k, v in event.items() if k != "kind"}
+
+
+class LiveTurn:
+    """A turn in flight: what has happened so far and who is watching. A card that opens the chat while
+    the turn runs (a reload, a phone waking up, a second screen) is told everything so far, then the rest.
+    Held in memory for the length of the turn only."""
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        self.kept = Kept()
+        self._events: list[dict[str, Any]] = []
+        self._listeners: list[Callable[[dict[str, Any]], None]] = []
+
+    def emit(self, event: dict[str, Any]) -> None:
+        self.kept.feed(event)
+        last = self._events[-1] if self._events else None
+        if last is not None and event.get("kind") in ("text", "thinking") and last["kind"] == event["kind"]:
+            last["text"] += event.get("text") or ""  # pieces of one stretch are replayed as one
+        else:
+            self._events.append(dict(event))
+        for listener in list(self._listeners):
+            try:
+                listener(event)
+            except Exception:  # noqa: BLE001 (a card that went away mustn't break the turn)
+                self.detach(listener)
+
+    def attach(self, listener: Callable[[dict[str, Any]], None]) -> None:
+        for event in self._events:
+            listener(dict(event))
+        self._listeners.append(listener)
+
+    def detach(self, listener: Callable[[dict[str, Any]], None]) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)

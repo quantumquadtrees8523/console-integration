@@ -78,8 +78,8 @@ class Style:
         history = self.data.history
         return [
             user_id
-            for user_id, messages in history.people.items()
-            if sum(1 for m in messages if m.get("who") == "you") >= MIN_MESSAGES
+            for user_id in history.people
+            if sum(1 for m in history.everything(user_id) if m.get("who") == "you") >= MIN_MESSAGES
         ]
 
     async def run(self, *, force: bool = False) -> dict[str, Any]:
