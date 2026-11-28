@@ -31,4 +31,4 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
 - Usage is shown to a household in credits (one cent each, `credits.py`), never dollars. A plan's price stays in dollars.
 - The relay's requests to the box are in `relay_api.py`, and their contract is `protocol/tunnel.md` in
   `console-relay`. Change the contract there first.
-- Release: bump `version` in `manifest.json` and `VERSION` in `const.py`, merge, tag `vX.Y.Z`.
+- Release: bump `version` in `manifest.json` and `VERSION` in `const.py`, merge, then tag `vX.Y.Z` or press Run workflow on `release` (main; an agent can start it through GitHub's API).
