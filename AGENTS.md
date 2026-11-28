@@ -8,6 +8,10 @@ about the agent (models, turns, schedules, what it spends). **Sunrise** is the s
 tools they use. **Makaan** is the operating system on top of Home Assistant. Put a change where it belongs:
 a skill's method or a tool in Sunrise, when and on which model it runs here.
 
+- **Every build job starts with tickets** (owner, 2026-11-28). A Linear issue in the Console Home team (`CON`)
+  carries the product story; a GitHub issue in each repo the job touches carries the engineering record. Open
+  both before writing code, or pick up existing ones. Put the Linear ID (`CON-123`) in the branch name and the PR
+  title so Linear links the PR, and link the Linear issue from the GitHub issue. One build chat per Linear issue.
 - One GitHub Issue, one branch, one PR. CI is the gate. A behavior is done only when a test proves it.
 - `custom_components/console/wording.py` holds every sentence a household reads. Change words there.
 - What a person says never leaves the box and is never in Console's store (`.storage/console`): a turn
