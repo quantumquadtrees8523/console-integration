@@ -1,10 +1,12 @@
 name: release
 
-# A tag vX.Y.Z is a release: tested, checked against the manifest's version, and published as a GitHub
-# release, which is what HACS installs.
+# A release: tested, checked against the manifest's version, and published as a GitHub release, which is
+# what HACS installs. Either a tag vX.Y.Z is pushed, or someone presses Run workflow on main (Actions →
+# release; an agent can start it through GitHub's API), which releases main's version as vX.Y.Z.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,10 +21,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+      - name: Which release
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"
+          else
+            [ "$GITHUB_REF_NAME" = main ] || { echo "Run it on main."; exit 1; }
+            tag="v$(python3 -c "import json;print(json.load(open('custom_components/console/manifest.json'))['version'])")"
+            if gh release view "$tag" >/dev/null 2>&1; then echo "$tag is already released."; exit 1; fi
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
       - name: The tag matches the manifest and const.py
         run: |
-          v="${GITHUB_REF_NAME#v}"
+          v="${TAG#v}"
           grep -q "\"version\": \"$v\"" custom_components/console/manifest.json
           grep -q "^VERSION = \"$v\"$" custom_components/console/const.py
       - name: Write the GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes
