@@ -1,11 +1,12 @@
-"""Suggested routines: the setting, the hourly listen, Monday's run, Flash with thinking off and never Pro, live
-routines with Keep and Undo, and the wipe.
+"""Suggested routines: the setting, the hourly and Monday runs (each one turn of the agent, guided by Sunrise's
+skill), Flash with thinking off and never Pro, live routines with Keep and Undo, pruning, and the wipe.
 
 Sunrise's routine tool is stood in for here by a small fake with the same ops and answers (Sunrise's own
 tests run the real one against Home Assistant's automations)."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -24,20 +25,15 @@ CONFIG = {
 
 
 class FakeRoutines:
-    """Sunrise's `routine` tool (suggestions saved, live with on=true, kept or dismissed) and its `usage` tool's
-    `follows` (what the house heard)."""
+    """Sunrise's `routine` tool: suggestions saved (live with on=true), kept or dismissed."""
 
     def __init__(self) -> None:
-        self.follows: list[dict[str, Any]] = []
         self.rows: dict[str, dict[str, Any]] = {}
         self.calls: list[tuple[str, str | None]] = []
         self.n = 0
 
     def handle(self, args: dict[str, Any], user_id: str | None) -> dict[str, Any]:
         op, rid = args.get("op"), args.get("id")
-        if "op" not in args:  # the usage tool
-            self.calls.append(("usage", user_id))
-            return {"days": args.get("days"), "things": [], "follows": self.follows}
         self.calls.append((op, user_id))
         if op == "list":
             return {"routines": [{"id": i, "entity_id": f"automation.{i}", "name": r["alias"], "on": r["on"],
@@ -61,11 +57,11 @@ class FakeRoutines:
 
 
 class _RoutineTool(llm.Tool):
-    description = "Sunrise"
+    name = "routine"
+    description = "Routines"
 
-    def __init__(self, fake: FakeRoutines, name: str = "routine") -> None:
+    def __init__(self, fake: FakeRoutines) -> None:
         self.fake = fake
-        self.name = name
 
     async def async_call(self, hass, tool_input, llm_context):
         user = llm_context.context.user_id if llm_context.context else None
@@ -78,7 +74,7 @@ class _Sunrise(llm.API):
         self.fake = fake
 
     async def async_get_api_instance(self, llm_context):
-        return llm.APIInstance(api=self, api_prompt="Sunrise.", llm_context=llm_context, tools=[_RoutineTool(self.fake), _RoutineTool(self.fake, "usage")])
+        return llm.APIInstance(api=self, api_prompt="Sunrise.", llm_context=llm_context, tools=[_RoutineTool(self.fake)])
 
 
 def _sunrise(hass: HomeAssistant, monkeypatch) -> FakeRoutines:
@@ -103,11 +99,11 @@ HEARD = {
 
 async def test_suggestions_are_off_until_turned_on_and_turning_them_on_says_what_it_costs(hass, console, model, monkeypatch):
     fake = _sunrise(hass, monkeypatch)
-    fake.follows = [{"routine": HEARD}]
     link(console)
     assert console.suggestions.state["on"] is False
     assert await console.suggestions.run() == {"ran": False, "why": "off"}
-    assert await console.suggestions.listen() == {"ran": False, "why": "off"}
+    assert await console.suggestions.run(heard=True) == {"ran": False, "why": "off"}
+    await hass.services.async_call("console", "suggest_routines", {}, blocking=True)  # the house asking: off is off
     assert model.calls == [] and fake.calls == []  # nothing spent, nothing read, while it's off
     console.suggestions.set_on(True)
     await hass.async_block_till_done()
@@ -117,38 +113,32 @@ async def test_suggestions_are_off_until_turned_on_and_turning_them_on_says_what
     assert "console_suggestions" in notes and "credits" in notes["console_suggestions"]["message"]
 
 
-async def test_an_hour_with_nothing_new_costs_nothing_and_a_new_pattern_becomes_a_live_routine(hass, console, model, monkeypatch):
+async def test_the_hourly_run_is_the_agent_following_sunrises_skill_and_what_it_saves_is_live(hass, console, model, monkeypatch):
+    """Owner, 2026-11-28: "the house uses console which is guided by sunrise to properly do the task". Console
+    hands the agent no routine and reads nothing itself: it asks, and the skill says how."""
     fake = _sunrise(hass, monkeypatch)
     link(console)
     console.suggestions.set_on(True)
-    assert await console.suggestions.listen() == {"ran": False, "why": "nothing new"}
-    assert model.calls == [] and fake.calls == [("usage", None)]  # Sunrise was asked; no model was
-
-    fake.follows = [{"routine": HEARD}]
     model.call_tool("sunrise__routine", {"op": "suggest", "on": True, "config": HEARD})
     model.say("Saved 1. [[customization]]")
-    done = await console.suggestions.listen()
+    done = await console.suggestions.run(heard=True)
     assert done["ran"] and done["made"] == 1 and done["cost_usd"] > 0
     asked = model.calls[0]["messages"][-1]["content"]
-    assert "on=true" in asked and "binary_sensor.front_door" in asked  # the routine itself is handed over
+    assert "get_skill name=routines" in asked and "Listening" in asked and "on=true" in asked
+    assert "binary_sensor" not in asked and "op=suggest" not in asked  # how is the skill's, not Console's
+    assert [op for op, _ in fake.calls if op not in ("list", "get")] == ["suggest"]  # Console itself only keeps its books
     [item] = console.suggestions.listing()["items"]
     assert item["name"] == HEARD["alias"] and set(item) == {"id", "name", "description", "made"}
     assert fake.rows[item["id"]]["on"] is True  # running from the moment it was saved
 
-    # The next hour hears the same thing: it isn't made, or paid for, twice.
-    assert await console.suggestions.listen() == {"ran": False, "why": "nothing new"}
-    assert len(model.calls) == 2
+    # An hour with nothing heard: the agent says so and nothing changes.
+    model.say("Saved 0: nothing new was heard. [[status]]")
+    assert (await console.suggestions.run(heard=True))["made"] == 0 and len(fake.rows) == 1
 
-
-async def test_a_pattern_sunrise_wont_save_is_offered_once_not_every_hour(hass, console, model, monkeypatch):
-    fake = _sunrise(hass, monkeypatch)
-    link(console)
-    console.suggestions.set_on(True)
-    fake.follows = [{"routine": HEARD}]
-    model.say("Saved 0: the light isn't exposed. [[customization]]")
-    assert (await console.suggestions.listen())["made"] == 0
-    assert await console.suggestions.listen() == {"ran": False, "why": "nothing new"}
-    assert len(model.calls) == 1
+    # The house can ask for it too.
+    model.say("Saved 0. [[status]]")
+    await hass.services.async_call("console", "suggest_routines", {"heard": True}, blocking=True)
+    assert len(model.calls) == 4 and "Listening" in model.calls[-1]["messages"][-1]["content"]
 
 
 async def test_every_run_is_flash_with_thinking_off_and_never_the_stronger_model(hass, console, model, monkeypatch):
@@ -164,9 +154,8 @@ async def test_every_run_is_flash_with_thinking_off_and_never_the_stronger_model
     done = await console.suggestions.run()  # Monday's run
     assert done["ran"] and done["made"] == 1
     assert "on=true" in model.calls[0]["messages"][-1]["content"]
-    fake.follows = [{"routine": HEARD}]
     model.fail(openrouter.ModelError("flash gave up"))  # the hourly one: Flash fails, and nothing is handed up
-    assert (await console.suggestions.listen())["made"] == 0
+    assert (await console.suggestions.run(heard=True))["made"] == 0
     assert {(c["model"], c["effort"]) for c in model.calls} == {(MODEL_FLASH, "none")}
     assert not any(t["function"]["name"] == "console_escalate" for c in model.calls for t in c["tools"])
     assert ("suggest", None) in fake.calls  # saved with nobody signed in
@@ -181,7 +170,6 @@ async def test_the_run_isnt_throttled_and_is_skipped_only_when_the_cloud_agent_c
     assert (await console.suggestions.run())["ran"] is True
     console.add_spend(0.02)  # 100%: the cloud agent is paused, so there's nothing to run it on
     assert (await console.suggestions.run())["why"] == "cloud agent over_limit"
-    assert (await console.suggestions.listen())["why"] == "not now"
     link(console, cap=1.0)
     console.set_switch("ai", False)
     assert (await console.suggestions.run())["why"] == "cloud agent ai_off"
@@ -189,30 +177,24 @@ async def test_the_run_isnt_throttled_and_is_skipped_only_when_the_cloud_agent_c
     for n in range(3):
         fake.handle({"op": "suggest", "on": True, "config": {**CONFIG, "alias": f"Routine {n}", "triggers": [{"trigger": "time", "at": f"2{n}:00:00"}]}}, None)
     assert (await console.suggestions.run())["why"] == "full"
-    fake.follows = [{"routine": HEARD}]
-    assert (await console.suggestions.listen())["why"] == "full"  # three wait for an answer: no more until one gets it
+    assert (await console.suggestions.run(heard=True))["why"] == "full"  # three wait for an answer: no run, nothing spent
     assert len(model.calls) == 1
 
 
 async def test_it_listens_every_hour_and_looks_at_the_whole_house_on_mondays_at_three(hass, console, monkeypatch):
     from datetime import datetime
 
-    ran, listened = [], []
+    ran = []
 
     async def run(**kw):
         ran.append(kw)
         return {}
 
-    async def listen():
-        listened.append(1)
-        return {}
-
     monkeypatch.setattr(console.suggestions, "run", run)
-    monkeypatch.setattr(console.suggestions, "listen", listen)
     await console.suggestions._weekly(datetime(2026, 11, 30, 3, 0))  # a Monday
     await console.suggestions._weekly(datetime(2026, 12, 1, 3, 0))  # a Tuesday
     await console.suggestions._hourly(datetime(2026, 12, 1, 14, S.LISTEN_MINUTE))
-    assert len(ran) == 1 and S.RUN_AT == (0, 3, 0) and listened == [1]
+    assert ran == [{}, {"heard": True}] and S.RUN_AT == (0, 3, 0)
 
 
 async def test_keep_makes_it_an_ordinary_routine_and_undo_removes_it_for_good(hass, console, monkeypatch):
@@ -237,6 +219,27 @@ async def test_keep_makes_it_an_ordinary_routine_and_undo_removes_it_for_good(ha
     again = fake.handle({"op": "suggest", "on": True, "config": {**HEARD, "alias": "Hall at the door"}}, None)["id"]
     assert await console.suggestions.reconcile() == 0 and again not in fake.rows
     assert [n["name"] for n in console.suggestions.state["never"]] == [HEARD["alias"]]
+
+
+async def test_one_nobody_answers_for_a_week_is_pruned_and_never_suggested_again(hass, console, model, monkeypatch, freezer):
+    fake = _sunrise(hass, monkeypatch)
+    link(console)
+    console.suggestions.set_on(True)
+    old = fake.handle({"op": "suggest", "on": True, "config": CONFIG}, None)["id"]
+    await console.suggestions.reconcile()
+    freezer.tick(timedelta(days=S.EXPIRE_DAYS - 1))
+    new = fake.handle({"op": "suggest", "on": True, "config": HEARD}, None)["id"]
+    await console.suggestions.reconcile()
+    freezer.tick(timedelta(days=2))
+    link(console)  # a fresh key: the last one ran out days ago
+    model.say("Saved 0. [[status]]")
+    assert (await console.suggestions.run(heard=True))["ran"]  # every run prunes first
+    assert old not in fake.rows and new in fake.rows  # the old one stopped running; the newer one has days left
+    assert [i["id"] for i in console.suggestions.state["items"]] == [new]
+    assert [n["name"] for n in console.suggestions.state["never"]] == [CONFIG["alias"]]
+    assert console.suggestions.state["counts"][console.period]["expired"] == 1
+    again = fake.handle({"op": "suggest", "on": True, "config": {**CONFIG, "alias": "Kitchen off late"}}, None)["id"]
+    assert await console.suggestions.reconcile() == 0 and again not in fake.rows
 
 
 async def test_the_card_lists_them_and_only_an_administrator_keeps_or_undoes(hass, console, monkeypatch, hass_ws_client, hass_read_only_access_token):

@@ -42,26 +42,31 @@ longer than a key lasts, or the model fails) the person is told so, and step 1 k
 
 ## Suggested routines
 
-Console listens to the house and makes routines from what it hears. An administrator turns it on on the
-Console page, under Settings. It's off unless someone turns it on, because a run that makes a routine uses
-some of the month's credits (the Plan tab shows how many).
+The house uses Console, and Console is guided by Sunrise: each run is one ordinary turn of Console's agent
+following Sunrise's `routines` skill. An administrator turns it on on the Console page, under Settings.
+It's off unless someone turns it on, because every run uses some of the month's credits (the Plan tab
+shows how many).
 
-- **Every hour** Console asks Sunrise what the house heard: a door, window, motion or presence sensor
-  changed (or someone came or went), and a person switched a light, switch, fan or cover by hand within
-  two minutes, on at least 4 different days and 6 times in 10. Reading that uses no model, so an hour with
-  nothing new uses no credits.
-- **Every Monday at 3 AM** (the house's time) the cloud agent also follows Sunrise's `routines` skill to
-  look at how the house is used as a whole.
-- Both runs use `deepseek/deepseek-v4.1-flash` with thinking off, and are never handed to the stronger model.
+- **Every hour** the agent is asked what the house heard and follows the skill's "Listening": Sunrise
+  lists what followed what (a door, window, motion or presence sensor changed, or someone came or went,
+  and a person switched a light, switch, fan or cover by hand within two minutes, on at least 4 different
+  days and 6 times in 10), and the agent saves those routines or changes nothing.
+- **Every Monday at 3 AM** (the house's time) the agent follows the skill's "Suggesting routines" in full,
+  for habits by the clock too.
+- The house can ask for a run itself with the `console.suggest_routines` service (from an automation or a
+  button); it does nothing while the setting is off.
+- Every run uses `deepseek/deepseek-v4.1-flash` with thinking off, and is never handed to the stronger model.
 - Sunrise saves each one as a real automation, **running at once** and labelled **Suggested**, limited to
   the hours it actually happens in. It never makes one with a lock, alarm, garage door, heating or sound,
   or anything not exposed to Assist.
 - They show at the top of the Home dashboard, in the chat card, never as notifications. An administrator
-  presses **Keep** (it's an ordinary automation from then on) or **Undo** (it's removed, and never
-  suggested again). At most 3 wait for an answer at a time.
-- A run is skipped only when the cloud agent can't be used (switched off, unlinked, or the month's
-  allowance used up). **Suggest now** on the Console page runs Monday's look at once.
-- Needs Sunrise 0.4.0 or newer (its `usage` tool's `follows`, and its `routine` tool's `suggest` with `on`).
+  presses **Keep** (it's an ordinary automation from then on) or **Undo** (it's removed).
+- One nobody answers for 7 days is pruned: removed, like Undo. A removed one is never suggested again.
+- At most 3 wait for an answer at a time; while they do, no run is made. A run is also skipped when the
+  cloud agent can't be used (switched off, unlinked, or the month's allowance used up). **Suggest now** on
+  the Console page runs Monday's look at once.
+- Needs Sunrise 0.4.0 or newer (its `routines` skill's "Listening", its `usage` tool's `follows`, and its
+  `routine` tool's `suggest` with `on`).
 
 ## Where the credits went
 

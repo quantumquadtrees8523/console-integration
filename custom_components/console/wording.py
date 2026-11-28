@@ -124,15 +124,15 @@ def handoff(args: dict[str, Any]) -> str:
 
 SUGGESTIONS_ON_TITLE = "Suggested routines are on"
 SUGGESTIONS_ON = (
-    "Console now listens to the house. Every hour it checks what the house heard (a door opened, then someone "
-    "switched a light), and every Monday at 3 AM it looks at how the house is used. When something is clearly a "
-    "habit it makes the routine, running at once, and shows it at the top of Home with Keep and Undo. A run that "
-    "makes one uses some of this month's credits: see what it used on the [Console page](/console), under Where "
-    "it went. Turn it off any time under Settings."
+    "Console now listens to the house. Every hour its agent checks what the house heard (a door opened, then "
+    "someone switched a light), and every Monday at 3 AM it looks at how the house is used. When something is "
+    "clearly a habit it makes the routine, running at once, and shows it at the top of Home with Keep and Undo. "
+    "One nobody answers in 7 days is removed. Every run uses some of this month's credits, the hourly ones too: "
+    "see what they used on the [Console page](/console), under Where it went. Turn it off any time under Settings."
 )
 SUGGESTIONS_COST = (
-    "An hour with nothing new uses no credits. A run that makes a routine, and each Monday's run, uses some of "
-    "this month's credits. The Plan tab shows what it used, under Where it went."
+    "Every run uses some of this month's credits: a little each hour, more on Mondays. None runs while three "
+    "routines are waiting for an answer. The Plan tab shows what they used, under Where it went."
 )
 SUGGESTIONS_NO_SUNRISE = "Suggested routines need Sunrise, and it isn't installed."
 SUGGESTION_GONE = "That suggestion isn't here any more."

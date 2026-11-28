@@ -266,7 +266,7 @@ class ConsolePanel extends HTMLElement {
     const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">kept ${dayTime(k.at)}</td></tr>`).join("");
     return `<section><h2>Suggested routines</h2>
         <p><b>Suggested routines: ${g.on ? "on" : "off"}</b></p>
-        <p class="soft">Console listens to the house. Every hour it checks what the house heard (a door opened or someone came home, and a light was switched by hand right after, on at least 4 days and 6 times in 10), and every Monday at 3 AM it looks at how the house is used. When something is clearly a habit it makes the routine with Flash, thinking off: a real automation, running at once and labelled “Suggested”. It shows at the top of Home, in the chat card, with Keep and Undo. At most 3 wait for an answer at a time, and one you undo is never suggested again. Never a lock, alarm, garage door, heating or sound.</p>
+        <p class="soft">Console listens to the house. Every hour its agent, following Sunrise's routines skill, checks what the house heard (a door opened or someone came home, and a light was switched by hand right after, on at least 4 days and 6 times in 10), and every Monday at 3 AM it looks at how the house is used. When something is clearly a habit it makes the routine with Flash, thinking off: a real automation, running at once and labelled “Suggested”. It shows at the top of Home, in the chat card, with Keep and Undo. At most 3 wait for an answer at a time. One you undo, or that nobody answers in 7 days, is removed and never suggested again. Never a lock, alarm, garage door, heating or sound.</p>
         <div class="note">${esc(g.cost_note)}</div>
         ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn suggested routines off" : "Turn suggested routines on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
         <p class="soft">${esc(lastLine)}</p>
@@ -321,7 +321,7 @@ class ConsolePanel extends HTMLElement {
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
       else if (what === "sugg-set") {
-        if (at.on === "1" && !confirm("Turn suggested routines on? Console will make routines from what the house hears, running at once, with Keep and Undo on Home. A run that makes one uses some of this month's credits; the Plan tab shows what it used.")) return;
+        if (at.on === "1" && !confirm("Turn suggested routines on? Console will make routines from what the house hears, running at once, with Keep and Undo on Home. Every run uses some of this month's credits, the hourly ones too; the Plan tab shows what they used.")) return;
         await this._ws({ type: "console/suggestions/set", on: at.on === "1" }); this._suggSaid = "";
       }
       else if (what === "sugg-run") { this._suggSaid = "Looking at the house…"; this._draw(); const r = await this._ws({ type: "console/suggestions/run" }); this._suggSaid = r.ran ? `${r.made} new suggestion${r.made === 1 ? "" : "s"}.` : `Skipped: ${r.why}.`; }

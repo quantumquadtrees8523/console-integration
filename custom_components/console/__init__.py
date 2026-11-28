@@ -121,6 +121,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await dashboard.ensure(hass, data, force=bool(call.data.get("force", True)))
 
     hass.services.async_register(DOMAIN, "rebuild_dashboard", rebuild)
+
+    async def suggest_routines(call: ServiceCall) -> None:
+        """The house asks Console to look for routines now (suggestions.py): what it heard, or the whole house."""
+        await data.suggestions.run(heard=bool(call.data.get("heard", True)))
+
+    hass.services.async_register(DOMAIN, "suggest_routines", suggest_routines)
     return True
 
 
