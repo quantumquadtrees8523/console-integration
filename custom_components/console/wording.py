@@ -250,6 +250,44 @@ def suggestion_dismissed(name: str) -> str:
     return f"Removed “{name}”. I won't suggest it again."
 
 
+# --- what a chat turn may draw on (websocket_api.py): the model reads these, a household never does -----
+
+def scope_reply(title: str) -> str:
+    named = f" (“{title}”)" if title else ""
+    return (
+        f"\n\nThis message is a reply inside one of this person's conversations with you{named}. Answer within "
+        "that conversation. If it asks about something they said in another conversation, read it with "
+        "chat_history first."
+    )
+
+
+def scope_all(rows: list[dict[str, Any]]) -> str:
+    """A new conversation: the person's other recent ones, so a message about all of them can be answered."""
+    if not rows:
+        return "\n\nThis message starts a new conversation. The person has no other conversations with you yet."
+    lines = []
+    for row in rows:
+        said = " / ".join(f"{'They' if m['who'] == 'you' else 'You'}: {m['text']}" for m in row["said"])
+        lines.append(f"- “{row['title'] or 'Untitled'}”{(' (' + row['when'] + ')') if row.get('when') else ''}: {said}")
+    return (
+        "\n\nThis message starts a new conversation. These are this person's other recent conversations with you, "
+        "newest first. Each is separate from this one: draw on them only when the message is about them (\"what "
+        "did we talk about\", \"that thing from earlier\"), and read chat_history for anything older or in full.\n"
+        + "\n".join(lines)
+    )
+
+
+def export_text(threads: list[dict[str, Any]], person: str, agent: str = "Console") -> str:
+    """Conversations as plain text to copy or keep: each with its title and date, then who said what."""
+    parts = []
+    for thread in threads:
+        made = (thread.get("made") or "")[:10]
+        head = f"{thread.get('title') or 'Conversation'}" + (f" ({made})" if made else "")
+        said = [f"{person if m.get('who') == 'you' else agent}: {m.get('text') or ''}" for m in thread["messages"]]
+        parts.append(head + "\n" + "-" * min(len(head), 60) + "\n" + "\n\n".join(said))
+    return "\n\n\n".join(parts) + ("\n" if parts else "")
+
+
 TAP_STEP = ("Ran at home", "A tap on a suggestion: no AI, no internet.")
 CHAT_BUSY = "Console is still answering in this chat. Wait for it to finish, or start a new chat."
 

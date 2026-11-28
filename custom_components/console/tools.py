@@ -169,14 +169,16 @@ class ChatHistoryTool(llm.Tool):
     name = "chat_history"
     title = "Read my chat with Console"
     description = (
-        "The signed-in person's own earlier messages in Console's chat and Console's replies, oldest first: "
-        "each with when, who (you or console) and the text. Only theirs, never another household member's. "
-        "limit is how many of the newest messages (at most 200); days keeps only the last N days."
+        "The signed-in person's own earlier messages in Console's chat and Console's replies, across all their "
+        "conversations, oldest first: each with when, who (you or console), the text, and the conversation it "
+        "is in (its title and thread_id). Only theirs, never another household member's. limit is how many of "
+        "the newest messages (at most 200); days keeps only the last N days; thread_id keeps one conversation."
     )
     parameters = vol.Schema(
         {
             vol.Optional("limit", description="how many of the newest messages, at most 200"): vol.Coerce(int),
             vol.Optional("days", description="only messages from the last N days"): vol.Coerce(int),
+            vol.Optional("thread_id", description="only this conversation"): str,
         }
     )
     annotations = llm.ToolAnnotations(read_only=True, destructive=False, idempotent=True, open_world=False)
@@ -187,11 +189,15 @@ class ChatHistoryTool(llm.Tool):
         if not user_id:
             return llm.ToolResult(data={"error": "Only a signed-in person's own chat can be read, and nobody is signed in to this turn."}, error=False)
         limit = max(1, min(int(args.get("limit") or HISTORY_MAX), HISTORY_MAX))
-        messages = hass.data[DOMAIN].history.last(user_id, limit)
+        messages = hass.data[DOMAIN].history.everything(user_id)
+        if args.get("thread_id"):
+            messages = [m for m in messages if m.get("thread_id") == args["thread_id"]]
+        messages = messages[-limit:]
         if args.get("days"):
             since = datetime.now(UTC) - timedelta(days=max(1, int(args["days"])))
             messages = [m for m in messages if _when(m.get("at")) >= since]
-        out = [{"at": m.get("at"), "who": m.get("who"), "text": m.get("text")} for m in messages]
+        out = [{"at": m.get("at"), "who": m.get("who"), "text": m.get("text"), "conversation": m.get("conversation"),
+                "thread_id": m.get("thread_id")} for m in messages]
         return llm.ToolResult(
             data={"messages": out, "count": len(out), "yours": sum(1 for m in out if m["who"] == "you")}, error=False
         )

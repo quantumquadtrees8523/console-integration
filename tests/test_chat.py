@@ -273,7 +273,7 @@ async def test_a_card_that_opens_a_chat_mid_turn_watches_the_turn_and_the_reply_
     await late.send_json({"id": 2, "type": "console/chat/watch", "thread_id": thread})
     assert (await late.receive_json())["result"] == {"working": True}
     caught_up = [(await late.receive_json())["event"] for _ in range(4)]
-    assert caught_up[0] == {"kind": "thread", "thread_id": thread}
+    assert caught_up[0] == {"kind": "thread", "thread_id": thread, "scope": "all"}
     assert [e.get("title") or e["kind"] for e in caught_up[1:]] == ["Tried at home first", "Sent to the cloud agent", "thinking"]
 
     await asker.close()  # the card that asked goes away mid-turn
@@ -417,13 +417,111 @@ async def test_the_card_shows_thinking_as_one_line_with_the_rest_a_tap_away(hass
     assert '"Show all"' in script and "thinking.d.textContent += event.text" not in script
 
 
-async def test_the_card_keeps_one_turn_one_message_and_shows_chats_as_threads(hass, console, hass_client):
+async def test_the_card_keeps_one_turn_one_message_and_shows_conversations_as_comment_threads(hass, console, hass_client):
     """What the card must do for the server's promises to hold: never send a message again when its
-    connection comes back, pick a running turn up by watching it, and page within one chat."""
+    connection comes back, pick a running turn up by watching it, and show each conversation as a comment
+    thread (owner, 2026-11-28: "i need it to look like facebook comment threads"): what started it, the
+    replies under it, a Reply under each, and copying one conversation or all of them."""
     client = await hass_client()
     script = await (await client.get("/console_static/console-chat-card.js")).text()
     assert "resubscribe: false" in script  # Home Assistant would otherwise send the chat command again on reconnect
     assert '"console/chat/watch"' in script and 'addEventListener("ready"' in script
-    assert '"console/chat/threads"' in script and '"console/chat/thread/delete"' in script
-    assert "thread_id: this._thread" in script
+    assert '"console/chat/feed"' in script and '"console/chat/export"' in script and '"console/chat/thread/delete"' in script
+    assert 'el("div", "replies")' in script and "View earlier conversations" in script and '"Reply"' in script
+    assert "Copy all" in script and "Copy conversation" in script
     assert '"console/suggestions/seen"' in script and "_drawSuggested" in script and "_drawQuick" in script
+
+
+async def test_the_feed_is_each_conversation_with_its_newest_replies_and_the_rest_a_tap_away(hass, console, model, hass_ws_client):
+    link(console)
+    client = await hass_ws_client(hass)
+    model.say("Roses like sun. [[other]]")
+    roses, _ = await chat(hass, hass_ws_client, "where should the roses go in the garden", client)
+    for n in range(3):
+        model.say(f"Answer {n}. [[other]]")
+        await chat(hass, hass_ws_client, f"and question {n} about roses", client, thread_id=roses["thread_id"])
+    model.say("Tuesday. [[other]]")
+    bins, _ = await chat(hass, hass_ws_client, "when is the recycling collected on our street", client)
+
+    await client.send_json({"id": 970, "type": "console/chat/feed", "limit": 1})
+    page = (await client.receive_json())["result"]
+    assert [t["id"] for t in page["threads"]] == [bins["thread_id"]] and page["more"] is True  # the one used last first
+    await client.send_json({"id": 971, "type": "console/chat/feed", "skip": 1, "limit": 5})
+    page = (await client.receive_json())["result"]
+    [thread] = page["threads"]
+    assert page["more"] is False and thread["working"] is False and thread["total"] == 8
+    assert thread["root"]["text"] == "where should the roses go in the garden"  # what started it, always shown
+    assert [m["text"] for m in thread["replies"]] == ["and question 2 about roses", "Answer 2."] and thread["from"] == 6
+    await client.send_json({"id": 972, "type": "console/chat/history", "thread_id": roses["thread_id"], "before": thread["from"], "limit": 10})
+    earlier = (await client.receive_json())["result"]
+    assert earlier["from"] == 0 and [m["text"] for m in earlier["messages"]][1:3] == ["Roses like sun.", "and question 0 about roses"]
+    await client.send_json({"id": 973, "type": "console/chat/feed", "thread_id": bins["thread_id"]})
+    assert [t["root"]["text"] for t in (await client.receive_json())["result"]["threads"]] == ["when is the recycling collected on our street"]
+
+
+async def test_a_new_conversation_sees_the_others_and_a_reply_sees_only_its_own(hass, console, model, hass_ws_client):
+    """Owner, 2026-11-28: capture "the full set of conversations or a single conversation depending on the
+    scope of the message". Where it is written says which: a new conversation is told about the person's
+    other recent ones; a reply is kept to its own conversation and pointed at chat_history for the rest."""
+    link(console)
+    client = await hass_ws_client(hass)
+    model.say("Her name is Priya. [[other]]")
+    sister, events = await chat(hass, hass_ws_client, "my sister is called Priya", client)
+    assert events[0] == {"kind": "thread", "thread_id": sister["thread_id"], "scope": "all"}
+    assert "no other conversations with you yet" in model.calls[-1]["messages"][0]["content"]
+    model.say("Every other Tuesday. [[other]]")
+    await chat(hass, hass_ws_client, "the boiler gets serviced every other tuesday", client)
+
+    model.say("You told me about your sister Priya and the boiler. [[other]]")
+    _, events = await chat(hass, hass_ws_client, "what have we talked about so far", client)
+    assert events[0]["scope"] == "all"
+    system = model.calls[-1]["messages"][0]["content"]
+    assert "other recent conversations" in system
+    assert system.index("the boiler gets serviced") < system.index("my sister is called Priya")  # newest first
+    assert "They: my sister is called Priya / You: Her name is Priya." in system
+
+    model.say("Priya. [[other]]")
+    _, events = await chat(hass, hass_ws_client, "remind me of her name", client, thread_id=sister["thread_id"])
+    assert events[0]["scope"] == "conversation"
+    system = model.calls[-1]["messages"][0]["content"]
+    assert "reply inside one of this person's conversations" in system and "“my sister is called Priya”" in system
+    assert "boiler" not in json.dumps(model.calls[-1]["messages"])  # the other conversation stays out of a reply
+    assert console.scope == {}  # nothing left behind for the next turn
+
+
+async def test_one_conversation_or_all_of_them_can_be_copied_as_text(hass, console, model, hass_ws_client, hass_admin_user):
+    link(console)
+    client = await hass_ws_client(hass)
+    model.say("Her name is Priya. [[other]]")
+    sister, _ = await chat(hass, hass_ws_client, "my sister is called Priya", client)
+    model.say("Every other Tuesday. [[other]]")
+    await chat(hass, hass_ws_client, "the boiler gets serviced every other tuesday", client)
+    await client.send_json({"id": 980, "type": "console/chat/export", "thread_id": sister["thread_id"]})
+    one = (await client.receive_json())["result"]
+    name = hass_admin_user.name
+    assert one["conversations"] == 1 and one["messages"] == 2
+    assert one["text"].startswith("my sister is called Priya (") and f"{name}: my sister is called Priya\n\nConsole: Her name is Priya." in one["text"]
+    assert "boiler" not in one["text"] and "Tried at home first" not in one["text"]  # that conversation only, and no steps
+    await client.send_json({"id": 981, "type": "console/chat/export"})
+    every = (await client.receive_json())["result"]
+    assert every["conversations"] == 2 and every["text"].index("Priya") < every["text"].index("boiler")  # oldest first
+
+
+async def test_chat_history_says_which_conversation_each_message_is_in(hass, console, model, hass_ws_client, hass_admin_user):
+    from homeassistant.core import Context
+    from homeassistant.helpers import llm
+
+    from custom_components.console.const import DOMAIN
+
+    link(console)
+    client = await hass_ws_client(hass)
+    model.say("Her name is Priya. [[other]]")
+    sister, _ = await chat(hass, hass_ws_client, "my sister is called Priya", client)
+    model.say("Every other Tuesday. [[other]]")
+    await chat(hass, hass_ws_client, "the boiler gets serviced every other tuesday", client)
+    ctx = llm.LLMContext(platform=DOMAIN, context=Context(user_id=hass_admin_user.id), language="en", assistant="conversation", device_id=None)
+    api = await llm.async_get_api(hass, DOMAIN, ctx)
+    got = (await api.async_call_tool(llm.ToolInput(tool_name="chat_history", tool_args={}))).data
+    assert [m["conversation"] for m in got["messages"]] == ["my sister is called Priya"] * 2 + ["the boiler gets serviced every other tuesday"] * 2
+    one = (await api.async_call_tool(llm.ToolInput(tool_name="chat_history", tool_args={"thread_id": sister["thread_id"]}))).data
+    assert [m["text"] for m in one["messages"]] == ["my sister is called Priya", "Her name is Priya."]

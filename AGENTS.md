@@ -13,8 +13,13 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
 - What a person says never leaves the box and is never in Console's store (`.storage/console`): a turn
   leaves a route and a label there, and `test_nothing_a_person_says_is_kept` holds that line. The chat
   card's history is a file of its own on the box (`.storage/console_chat`, `history.py`), per signed-in
-  person, as threads (one per chat), shown and deletable in Console settings and erased by the data wipe.
-  Nothing may send it anywhere.
+  person, as threads (one per conversation), shown and deletable in Console settings and erased by the data
+  wipe. Nothing may send it anywhere but to the model, as the conversation it belongs to.
+- The card draws conversations as comment threads (owner, 2026-11-28: "facebook comment threads"): what
+  started one, Console's and the person's replies indented under it, Reply under each. Where a message is
+  written is its scope: a reply stays in its conversation; a new one is told about the person's other
+  recent conversations (`history.digest`, `wording.scope_all`). One conversation or all of them copy out as
+  text (`console/chat/export`).
 - What the agent is doing during a turn (`trail.py`) goes to the cards showing that chat, and its steps are
   kept with the reply in that person's thread (owner, 2026-11-28: "show each chat and agent's work within
   the thread of a chat"). Same file, same rules as the chat history: on the box only, never logged, never

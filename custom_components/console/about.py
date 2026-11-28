@@ -78,9 +78,10 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
         ],
         "when_it_cannot": "call console_handoff: the person gets steps and a block to paste into Claude Code",
         "what_is_kept": (
-            "Chats are kept on this box only, per signed-in person, as threads with the steps behind each reply, "
-            "and are deletable in the chat card's list and in Console settings under What the house knows about "
-            "you. Monthly totals (counts by kind and route, and "
+            "Chats are kept on this box only, per signed-in person, as conversations shown like comment threads, "
+            "with the steps behind each reply. A reply stays inside its conversation; a new conversation is "
+            "given a short digest of the person's other recent ones. Each can be copied or deleted in the chat "
+            "card, and all of them deleted in Console settings under What the house knows about you. Monthly totals (counts by kind and route, and "
             "credits used) go to Console's relay, and so do counts of what kind of thing each request was, as "
             "labels from a fixed list such as lights.on_off, which the relay adds to one total for all houses "
             "and does not keep for this house; no message, device name or room does."

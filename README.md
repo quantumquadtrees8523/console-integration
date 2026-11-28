@@ -42,18 +42,31 @@ Until then the card says the cloud agent isn't connected, and plain commands sti
 If the cloud agent can't be used (the month's allowance is spent, the relay has been out of reach for
 longer than a key lasts, or the model fails) the person is told so, and step 1 keeps working.
 
-## Chats are threads
+## Conversations are comment threads
 
-Each chat is its own thread. **Chats** at the top of the card lists them, newest first; open one and the
-whole of it is there, ten messages at a time from the newest, with a line under each reply that opens into
-the work behind it: where the request went and why, the model's thinking, each tool it used and what came
-back. A chat used in the last half hour opens by itself; otherwise the card starts a new one.
+The chat card shows your conversations the way comment threads look: each one starts with what you first
+asked, and Console's replies and your own replies sit under it, indented and joined by a line. Under each
+message: when, **Reply**, and under Console's replies the work behind it (where the request went and why,
+the model's thinking, each tool it used and what came back), a tap away. The two newest replies show;
+**View N earlier replies** brings the rest, and **View earlier conversations** at the top brings older ones.
 
-- Threads are kept on the box only, per signed-in person: the newest 40 chats, 200 messages each. ✕ beside
-  a chat deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
+**Where you write is the scope.**
+
+- The box at the bottom starts a **new conversation**. Console is given a short digest of your other recent
+  conversations (what started each one and its last exchange), so "what did we talk about today?" or "that
+  thing from earlier" can be answered.
+- **Reply** under a conversation keeps to **that conversation**. Console sees only it, and reads your other
+  conversations with its `chat_history` tool only when the reply asks about them.
+
+**Copy** under what started a conversation copies that conversation as text; **Copy all** at the top
+copies every one of them. What was said only, not the steps.
+
+- Conversations are kept on the box only, per signed-in person: the newest 40, 200 messages each.
+  **Delete** under one deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
 - A turn runs on the box whoever is watching. If the card reloads, the phone sleeps or the connection
-  drops, the reply still lands in its thread, and a card that opens the chat meanwhile picks the turn up as
+  drops, the reply still lands in its conversation, and a card that opens meanwhile picks the turn up as
   it happens. One message is always one turn: nothing is sent again when the connection comes back.
+- A tap on a suggestion goes into the conversation whose reply box is open, or starts one of its own.
 
 ## Suggestions and quick actions
 
@@ -140,7 +153,8 @@ at 100% the cloud agent pauses until the 1st, as before, and the house keeps wor
 ## What leaves the house
 
 - To the model provider (OpenRouter): the conversation, the tool list and tool results, for requests
-  that step 1 didn't answer.
+  that step 1 didn't answer. For a new conversation in the chat card, also a short digest of that
+  person's own other recent conversations (never anyone else's).
 - To Console's relay: once in a while, this month's totals. Requests by kind (`control`, `status`,
   `customization`, `setup`, `troubleshooting`, `other`), by route, by agent, how many were done, and
   the spend. No messages, device names, rooms or times of day. Console settings shows the exact payload.

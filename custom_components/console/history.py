@@ -1,7 +1,9 @@
-"""The chat card's history: every chat a person has had with Console, each one a thread of its own.
+"""The chat card's history: every conversation a person has had with Console, each one a thread.
 
-A thread holds what was said and, with each of Console's replies, the work behind it (where the request
-went, the thinking, each tool and what came back), so opening a chat again shows the whole of it.
+The card shows them the way comment threads are shown: each conversation starts with what the person
+first said, and everything after it (Console's replies, the person's replies) sits under it. A thread
+holds what was said and, with each of Console's replies, the work behind it (where the request went,
+the thinking, each tool and what came back).
 
 It is a file of its own (.storage/console_chat), apart from Console's store, and it never leaves the
 box: it is in nothing the relay reads. Each signed-in Home Assistant person has their own threads. They
@@ -25,12 +27,20 @@ PAGE = 10
 TEXT_MAX = 8000
 TITLE_MAX = 60
 EARLIER = "Earlier messages"  # the thread a history from before threads is moved into
+REPLIES_SHOWN = 2  # replies the feed shows under each conversation; the rest are a tap away
+DIGEST_THREADS = 6  # other conversations given to the model for a new one
+DIGEST_CHARS = 240  # of each message in that digest
 
 
 def new_id() -> str:
     """A thread's id, which is also its conversation id in Home Assistant. Not a ULID on purpose: Home
     Assistant keeps an id it didn't make itself, so a thread keeps one id for as long as it lives."""
     return f"console-{secrets.token_hex(8)}"
+
+
+def _clip(text: str, limit: int) -> str:
+    line = " ".join(str(text or "").split())
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
 
 
 def _title(text: str) -> str:
@@ -64,6 +74,13 @@ class ChatHistory:
 
     def _thread(self, user_id: str, thread_id: str | None) -> dict[str, Any] | None:
         return next((t for t in self.people.get(user_id, []) if t["id"] == thread_id), None)
+
+    def has(self, user_id: str, thread_id: str | None) -> bool:
+        return bool(thread_id) and self._thread(user_id, thread_id) is not None
+
+    def title(self, user_id: str, thread_id: str) -> str:
+        thread = self._thread(user_id, thread_id)
+        return thread["title"] if thread else ""
 
     def newest(self, user_id: str) -> dict[str, Any] | None:
         mine = self.people.get(user_id, [])
@@ -100,6 +117,51 @@ class ChatHistory:
         self._save()
         return thread["id"]
 
+    def _item(self, thread: dict[str, Any], replies: int = REPLIES_SHOWN) -> dict[str, Any]:
+        """One conversation as the feed shows it: what started it, and its newest replies. `from` is the
+        index of the first reply shown (1 when they all are)."""
+        messages = thread["messages"]
+        start = max(1, len(messages) - replies)
+        return {"id": thread["id"], "title": thread["title"], "at": thread.get("at"), "made": thread.get("made"),
+                "root": messages[0] if messages else None, "replies": messages[start:], "from": start, "total": len(messages)}
+
+    def feed(self, user_id: str, skip: int = 0, limit: int = 8, thread_id: str | None = None) -> dict[str, Any]:
+        """This person's conversations, the one used last first, `limit` at a time after the first `skip`.
+        With `thread_id`: that one only."""
+        if thread_id:
+            thread = self._thread(user_id, thread_id)
+            return {"threads": [self._item(thread)] if thread else [], "more": False}
+        mine = sorted(self.people.get(user_id, []), key=lambda t: t.get("at") or "", reverse=True)
+        return {"threads": [self._item(t) for t in mine[skip : skip + limit]], "more": len(mine) > skip + limit}
+
+    def digest(self, user_id: str, exclude: str | None = None, count: int = DIGEST_THREADS) -> list[dict[str, Any]]:
+        """This person's other recent conversations, newest first, boiled down for the model: each one's
+        title, when, what started it and the last exchange."""
+        out = []
+        for row in self.threads(user_id):
+            if row["id"] == exclude:
+                continue
+            thread = self._thread(user_id, row["id"])
+            messages = thread["messages"] if thread else []
+            if not messages:
+                continue
+            shown = [messages[0], *messages[max(1, len(messages) - 2) :]]
+            out.append({"title": row["title"], "at": row["at"],
+                        "said": [{"who": m.get("who"), "text": _clip(m.get("text") or "", DIGEST_CHARS)} for m in shown]})
+            if len(out) >= count:
+                break
+        return out
+
+    def export(self, user_id: str, thread_id: str | None = None) -> list[dict[str, Any]]:
+        """Conversations to copy out, oldest first: one, or all of this person's. What was said only, not the steps."""
+        if thread_id:
+            thread = self._thread(user_id, thread_id)
+            chosen = [thread] if thread else []
+        else:
+            chosen = sorted(self.people.get(user_id, []), key=lambda t: t.get("made") or "")
+        return [{"id": t["id"], "title": t["title"], "made": t.get("made"),
+                 "messages": [{"at": m.get("at"), "who": m.get("who"), "text": m.get("text")} for m in t["messages"]]} for t in chosen]
+
     def page(self, user_id: str, thread_id: str | None = None, before: int | None = None, limit: int = PAGE) -> dict[str, Any]:
         """Up to `limit` messages of one thread ending just before index `before` (the newest when None),
         oldest first. With no thread named: the one this person used last."""
@@ -122,7 +184,9 @@ class ChatHistory:
         return self.everything(user_id)[-count:] if count > 0 else []
 
     def everything(self, user_id: str) -> list[dict[str, Any]]:
-        messages = [m for thread in self.people.get(user_id, []) for m in thread["messages"]]
+        """All of this person's messages, oldest first, each saying which conversation it is in."""
+        messages = [m | {"thread_id": thread["id"], "conversation": thread["title"]}
+                    for thread in self.people.get(user_id, []) for m in thread["messages"]]
         return sorted(messages, key=lambda m: m.get("at") or "")
 
     def count(self, user_id: str) -> int:

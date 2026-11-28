@@ -322,6 +322,8 @@ class ConsoleAgent(conversation.ConversationEntity):
         if sunrise:
             system = chat_log.content[0]
             chat_log.content[0] = conversation.SystemContent(content=system.content + devices_block(self.hass))
+        if scope := self.data.scope.pop(chat_log.conversation_id, None):  # the chat card: one conversation, or all of them
+            chat_log.content[0] = conversation.SystemContent(content=chat_log.content[0].content + scope)
 
         route, effort = router.first_route(user_input.text)
         # A suggestions run is Flash with thinking off, and never the stronger model (owner, 2026-11-28: "made

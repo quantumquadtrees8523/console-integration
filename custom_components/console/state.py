@@ -96,6 +96,9 @@ class ConsoleData:
         self.streams: dict[str, Callable[[dict[str, Any]], None]] = {}
         self.live: dict[str, Any] = {}  # thread id -> trail.LiveTurn
         self.earlier: dict[str, list[dict[str, Any]]] = {}
+        # What a chat turn may draw on, by conversation id, added to the model's instructions for that turn:
+        # the person's other recent conversations (a new one), or a note that it is a reply in one.
+        self.scope: dict[str, str] = {}
         # Requests whose path the caller knows (the chat card, the suggestions run), by context id, for one turn.
         self.via: dict[str, str] = {}
 

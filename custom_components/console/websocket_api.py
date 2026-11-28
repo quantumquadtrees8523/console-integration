@@ -45,6 +45,8 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_chat,
         ws_chat_watch,
         ws_chat_threads,
+        ws_chat_feed,
+        ws_chat_export,
         ws_chat_history,
         ws_chat_thread_delete,
         ws_chat_clear,
@@ -219,6 +221,21 @@ async def ws_backup_now(hass: HomeAssistant, connection: websocket_api.ActiveCon
         connection.send_error(msg["id"], "failed", str(error))
 
 
+def _digest(hass: HomeAssistant, data, user_id: str, thread_id: str) -> list[dict[str, Any]]:
+    """The person's other recent conversations, with when each was in the house's own time."""
+    from datetime import datetime  # noqa: PLC0415
+
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    rows = data.history.digest(user_id, exclude=thread_id)
+    for row in rows:
+        try:
+            row["when"] = dt_util.as_local(datetime.fromisoformat(row["at"])).strftime("%b %-d, %-I:%M %p")
+        except (TypeError, ValueError):
+            row["when"] = ""
+    return rows
+
+
 def _thread_for(data, user_id: str, asked: str | None) -> str:
     """The thread a message goes into: the one asked for when it is this person's own (or nobody's yet),
     else a new one. A thread's id is its conversation's id, so nobody can join another person's."""
@@ -262,12 +279,18 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     live.attach(send)
     connection.subscriptions[msg["id"]] = lambda: live.detach(send)
     connection.send_result(msg["id"], {"thread_id": thread_id, "conversation_id": thread_id})
-    live.emit({"kind": "thread", "thread_id": thread_id})  # first, so a card knows which chat this is before anything else
+    # Where it was written says what it may draw on: a reply stays in its conversation; a new one sees the
+    # person's other recent conversations too (owner, 2026-11-28).
+    reply = data.history.has(user_id, thread_id)
+    live.emit({"kind": "thread", "thread_id": thread_id, "scope": "conversation" if reply else "all"})  # first, so a card knows which chat this is
     if not text:
         data.live.pop(thread_id, None)
         send({"kind": "done", "reply": "", "thread_id": thread_id, "conversation_id": thread_id, "error": True})
         return
     data.earlier[thread_id] = data.history.context(user_id, thread_id, EARLIER)
+    data.scope[thread_id] = (
+        wording.scope_reply(data.history.title(user_id, thread_id)) if reply else wording.scope_all(_digest(hass, data, user_id, thread_id))
+    )
     data.streams[thread_id] = live.emit
     data.history.add(user_id, "you", text, thread_id)
     started = time.monotonic()
@@ -285,6 +308,7 @@ async def ws_chat(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     finally:
         data.streams.pop(thread_id, None)
         data.earlier.pop(thread_id, None)
+        data.scope.pop(thread_id, None)
         data.live.pop(thread_id, None)
         if "context" in locals():
             data.via.pop(context.id, None)
@@ -329,6 +353,37 @@ def ws_chat_threads(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     for row in rows:
         row["working"] = row["id"] in data.live
     connection.send_result(msg["id"], {"threads": rows})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "console/chat/feed",
+        vol.Optional("skip", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional("limit", default=8): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+        vol.Optional("thread_id"): vol.Any(str, None),
+    }
+)
+@callback
+def ws_chat_feed(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """This person's conversations as comment threads, the one used last first: each with what started it
+    and its newest replies (`from` is where the replies shown begin; earlier ones come from
+    console/chat/history). `working` says a turn is running in it right now."""
+    data = hass.data[DOMAIN]
+    feed = data.history.feed(connection.user.id, msg["skip"], msg["limit"], msg.get("thread_id"))
+    for item in feed["threads"]:
+        live = data.live.get(item["id"])
+        item["working"] = bool(live and live.user_id == connection.user.id)
+    connection.send_result(msg["id"], feed)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/chat/export", vol.Optional("thread_id"): vol.Any(str, None)})
+@callback
+def ws_chat_export(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """One of this person's conversations, or all of them, as text to copy (what was said, not the steps)."""
+    threads = hass.data[DOMAIN].history.export(connection.user.id, msg.get("thread_id"))
+    person = connection.user.name or "You"
+    connection.send_result(msg["id"], {"text": wording.export_text(threads, person), "conversations": len(threads),
+                                       "messages": sum(len(t["messages"]) for t in threads)})
 
 
 @websocket_api.websocket_command(
