@@ -139,16 +139,17 @@ def ws_learned_forget(hass: HomeAssistant, connection: websocket_api.ActiveConne
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "console/prefs/forget", vol.Required("entity_id"): str, vol.Required("setting"): vol.In(["volume", "brightness"])}
+    {vol.Required("type"): "console/prefs/forget", vol.Required("entity_id"): str, vol.Required("setting"): str}
 )
 @websocket_api.require_admin
 @callback
 def ws_prefs_forget(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """Forget a level Console learned for a device (prefs.py)."""
     prefs = hass.data[DOMAIN].prefs
-    name = next((row["name"] for row in prefs.listing() if row["entity_id"] == msg["entity_id"]), msg["entity_id"])
+    row = next((r for r in prefs.listing() if r["entity_id"] == msg["entity_id"] and r["setting"] == msg["setting"]), None)
     ok = prefs.forget(msg["entity_id"], msg["setting"])
-    connection.send_result(msg["id"], {"ok": ok, "message": wording.pref_forgotten(name, msg["setting"]) if ok else ""})
+    message = wording.pref_forgotten(row["name"], row["label"]) if ok and row else ""
+    connection.send_result(msg["id"], {"ok": ok, "message": message})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/assist/clear"})

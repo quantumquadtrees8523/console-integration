@@ -48,8 +48,9 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
             "where": "Console settings > AI features; only an administrator can switch one, and this chat can't",
         },
         "device_settings": (
-            "Console learns the volume this household wants each speaker at and the brightness it wants each light at, "
-            "from what people ask it for and change by hand, and uses them when nobody names a level. Listed and "
+            "Console learns how this household wants each device set (volume, brightness, colour, temperature, "
+            "position, speed, mode, a number's or a select's value…), from what people ask it for and change by hand, "
+            "and uses them when nobody says. Listed and "
             "forgettable in Console settings > What the house knows about you; switched off under AI features."
         ),
         "chat_suggestions": (

@@ -293,7 +293,8 @@ async def run(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
         learned = None
         if volume is None:  # no level asked for: the one this household wants this speaker at, if it has one (prefs.py)
             prefs = getattr(hass.data.get(DOMAIN), "prefs", None)
-            learned = prefs.level(player["id"], "volume") if prefs is not None else None
+            level = prefs.value(player["id"], "volume_level") if prefs is not None else None
+            learned = round(level * 100) if level is not None else None
             volume = learned
         if volume is not None:
             level = max(0, min(100, int(volume))) / 100

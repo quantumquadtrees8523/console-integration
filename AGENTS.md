@@ -34,9 +34,10 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
   run added routines. Three taps on two days makes one a quick action; four sightings on two days with no
   tap discards it. Only lights, switches, fans, helpers and scenes exposed to Assist.
 - Every chat, voice and Assist turn, and every change by hand, feeds the device-settings learner
-  (`prefs.py`; owner, 2026-11-28): a speaker's volume and a light's brightness a person asked for or left a
-  device at. Only levels a person chose count: never one the agent picked unasked, never an automation's.
-  The agent is told them every turn and the music tool plays at them. Levels and times only, no words.
+  (`prefs.py`; owner, 2026-11-28: "this should be general. not just speakers and lights"). Any adjustable
+  setting Home Assistant has an action for, per domain in `prefs.SETTINGS` (add a row, not a module). Only
+  values a person chose count: never one the agent picked unasked (the person's words are checked, never
+  kept), never an automation's. The agent is told them every turn and the music tool plays at them.
 - Each use of the cloud agent is an AI feature with its own switch and its cost in words (`features.py`,
   the AI features tab). A new one gets a row there. `cloud_state()` is what the relay is told: a feature
   switch never changes it.

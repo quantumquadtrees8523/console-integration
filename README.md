@@ -86,25 +86,40 @@ What was said only, not the steps.
 
 ## Device settings Console learns
 
-Console remembers the volume you want each speaker at and the brightness you want each light at, and uses
-them whenever you don't name a level.
+Console remembers how you want each device set, and uses that whenever you don't say. Any setting you can
+adjust and Home Assistant has an action for:
 
-- **From your chats.** Say "the music's too loud in the kitchen, turn it down" (by chat, voice or Assist)
-  and Console keeps the level the speaker ends up at.
-- **From what you do by hand.** Turn the speaker's own knob or drag the slider in the app, and Console keeps
-  the level you leave it at, once you stop adjusting.
-- **Corrections count most.** Change a device within 10 minutes of Console setting it, and your level
+| Device | Settings |
+|---|---|
+| Lights | brightness, colour temperature, colour, effect |
+| Speakers and TVs | volume, source, sound mode |
+| Thermostats | target temperature (or range), mode, fan, preset, swing, humidity |
+| Fans | speed, preset, direction, oscillation |
+| Blinds, curtains, garage-style covers, valves | position, tilt |
+| Humidifiers, water heaters | target, mode, temperature |
+| Vacuums | fan speed |
+| Numbers and selects (helpers too) | their value |
+
+Never a lock or an alarm.
+
+- **From your chats.** Say "the music's too loud in the kitchen, turn it down" or "set the bedroom to 19" (by
+  chat, voice or Assist) and Console keeps the value the device ends up at. It counts only when you asked:
+  a number or which way ("too loud", "a bit warmer") for a level, the name of the mode or option for a
+  choice. Your words are only looked at, never kept.
+- **From what you do by hand.** Turn the speaker's knob, drag a slider in the app, move the blind: Console
+  keeps the value you leave it at, once you stop adjusting. For settings a device also changes by itself (a
+  thermostat's schedule, a TV switching input), only changes made by someone signed in to Home Assistant count.
+- **Corrections count most.** Change a device within 10 minutes of Console setting it, and your value
   replaces the one Console chose.
-- **What doesn't count:** a level Console picked itself without being asked, and changes made by routines
-  and scripts.
+- **What doesn't count:** a value Console picked without being asked, and changes made by routines and scripts.
 
-A device's level is the middle of its last 5, so one loud song doesn't move it. Console is told each one on
-every request, and starts music on a speaker at that speaker's volume ("play some jazz in the kitchen").
-Whatever you ask for at the time always wins.
+A number's learned value is the middle of its last 5; a choice's is the one made most often among its last 5.
+One odd evening doesn't move it. Console is told each one on every request, and starts music on a speaker at
+that speaker's volume ("play some jazz in the kitchen"). Whatever you ask for at the time always wins.
 
 They're listed in Console settings under **What the house knows about you**, where an administrator can
 forget one. **Learn device settings** under AI features turns it off (it's free: no AI is used). Console
-keeps each device's last few levels, when and how; never what anyone said, and none of it goes to the relay.
+keeps each device's last few values, when and how; never what anyone said, and none of it goes to the relay.
 
 ## Suggestions and quick actions
 

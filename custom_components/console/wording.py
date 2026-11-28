@@ -253,21 +253,43 @@ def suggestion_dismissed(name: str) -> str:
 # --- device settings (prefs.py) -----------------------------------------------------------------------
 
 PREFS_HEADER = (
-    "\n\nSettings this household chose for its devices, learned from what they asked you for and what they "
-    "changed by hand. When someone asks for one of these devices without naming a level (\"play some jazz in "
-    "the kitchen\", \"turn on the desk lamp\"), use this level. What they ask for now always wins.\n"
+    "\n\nHow this household wants its devices set, learned from what they asked you for and what they changed "
+    "by hand. When someone asks for one of these devices without saying how (\"play some jazz in the kitchen\", "
+    "\"turn on the desk lamp\", \"heat the living room\"), set it this way. What they ask for now always wins.\n"
 )
-SETTING_WORDS = {"volume": "volume", "brightness": "brightness"}
 HOW_WORDS = {"asked": "asked for", "by hand": "set by hand", "corrected": "corrected after Console set it"}
+
+
+def setting_value(s, value: Any, temperature_unit: str = "°C") -> str:
+    """A learned value the way a person reads it: 40%, 21.5 °C, 2700 K, heat, [255, 120, 0]."""
+    if value is None:
+        return ""
+    if s.unit == "%255":
+        return f"{round(float(value) * 100 / 255)}%"
+    if s.unit == "%1":
+        return f"{round(float(value) * 100)}%"
+    number = f"{value:g}" if isinstance(value, float) else str(value)
+    if s.unit == "%":
+        return f"{number}%"
+    if s.unit == "temp":
+        return f"{number} {temperature_unit}"
+    if s.unit == "K":
+        return f"{number} K"
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return number
 
 
 def pref_line(row: dict[str, Any]) -> str:
     times = f"{row['times']} time{'s' if row['times'] != 1 else ''}"
-    return f"- {row['name']} ({row['entity_id']}): {SETTING_WORDS[row['setting']]} {row['level']}% (from {times}; last {HOW_WORDS.get(row['last_how'], row['last_how'])})"
+    return (
+        f"- {row['name']} ({row['entity_id']}): {row['label']} {row['shown']} "
+        f"[{row['setting']}={row['value']!r}] (from {times}; last {HOW_WORDS.get(row['last_how'], row['last_how'])})"
+    )
 
 
-def pref_forgotten(name: str, setting: str) -> str:
-    return f"Forgotten. Console no longer assumes a {SETTING_WORDS.get(setting, setting)} for {name}."
+def pref_forgotten(name: str, label: str) -> str:
+    return f"Forgotten. Console no longer assumes a {label} for {name}."
 
 
 # --- what a chat turn may draw on (websocket_api.py): the model reads these, a household never does -----
@@ -380,9 +402,10 @@ FEATURES = {
     "prefs": {
         "name": "Learn device settings",
         "what": (
-            "Remembers the volume you want each speaker at and the brightness you want each light at: from what you "
-            "ask Console for (\u201ctoo loud, turn it down\u201d) and what you change by hand. Console uses them "
-            "whenever you don't name a level, and starts music at that speaker's volume."
+            "Remembers how you want each device set (a speaker's volume, a light's brightness or colour, the "
+            "thermostat's temperature, a blind's position, a fan's speed and the rest): from what you ask Console for "
+            "(\u201ctoo loud, turn it down\u201d) and what you change by hand. Console uses them whenever you don't "
+            "say, and starts music at that speaker's volume."
         ),
         "cost": "Free. It's worked out on this box from what you do, with no AI.",
         "off": "Off: nothing more is learned, and Console stops using what it learned. What it learned is kept until you forget it.",
