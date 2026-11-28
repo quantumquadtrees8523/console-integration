@@ -43,8 +43,23 @@ NOT_LINKED_REPLY = (
 )
 
 MODEL_FAILED_REPLY = (
-    "Something went wrong on my side and I didn't finish that. Nothing else changed. Try again in a moment."
+    "Something went wrong on my side and I didn't finish that. Nothing in the house changed. "
+    "Try again in a moment."
 )
+
+
+def model_failed(changed: list[str]) -> str:
+    """The reply when both models gave up. When tools had already changed things, say exactly which,
+    so nobody is told "nothing changed" about a routine that was in fact saved."""
+    if not changed:
+        return MODEL_FAILED_REPLY
+    steps = "\n".join(f"- {step}" for step in changed[:8])
+    more = f"\n- and {len(changed) - 8} more" if len(changed) > 8 else ""
+    return (
+        "I stopped before finishing that. These steps had already run:\n"
+        f"{steps}{more}\n\n"
+        "Say “continue” and I'll pick up from there, or “undo that” to take them back."
+    )
 
 LEARNED = "I've learned that one: from now on it runs at home, without the cloud."
 
