@@ -13,7 +13,9 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
 - What a person says never leaves the box and is never in Console's store (`.storage/console`): a turn
   leaves a route and a label there, and `test_nothing_a_person_says_is_kept` holds that line. The chat
   card's history is a file of its own on the box (`.storage/console_chat`, `history.py`), per signed-in
-  person, as threads (one per chat), shown and deletable in Console settings and erased by the data wipe.
+  person, as one feed of chats, each chat a thread (owner, 2026-11-28: "a feed of chats and each chat has
+  its own mini history ... only that thread's convo is added to context": the card shows the feed, a reply
+  names its chat, and a turn's context is that chat alone), shown and deletable in Console settings and erased by the data wipe.
   Nothing may send it anywhere.
 - What the agent is doing during a turn (`trail.py`) goes to the cards showing that chat, and its steps are
   kept with the reply in that person's thread (owner, 2026-11-28: "show each chat and agent's work within

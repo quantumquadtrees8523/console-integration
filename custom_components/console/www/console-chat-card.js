@@ -1,23 +1,28 @@
 // Console chat card: talk to Console, this home's agent, from a dashboard.
 //
-// Chats are threads. Each chat a person has is kept on the box (never in this card, never off the box)
-// with the work behind every reply: where the request went and why, the model's thinking, each tool it
-// used and what came back. The list of chats opens from the top bar; opening one shows the whole of it,
-// ten messages at a time from the newest.
+// The card is one feed of chats, and each chat is a thread inside it (owner, 2026-11-28: "a feed of chats
+// and each chat has its own mini history ... like a Facebook comment thread"). It is drawn as comments:
+// each one an avatar, a name and its words in a bubble, with a line under it (when, Reply). What you ask
+// is a top-level comment; Console's answer and everything after are replies indented under it. The box at
+// the bottom starts a new chat. Reply opens a box inside that thread, and what's written there goes into
+// that chat alone: only its messages are the model's context. View more replies opens a chat's own
+// history in place. Everything is kept on the box (never in this card, never off the
+// box) with the work behind every reply: where the request went and why, the model's thinking, each tool
+// it used and what came back. Ten chats at a time from the newest.
 //
 // A turn is asked through Console's own websocket command (console/chat), which answers as the turn
 // happens. One message is one turn: the command is never sent again when the connection comes back
 // (resubscribe: false). A turn runs on the box whoever is listening, so a card that reloads, reconnects
-// or opens the chat on another screen watches the running turn (console/chat/watch) or finds the reply
-// in the thread.
+// or opens the feed on another screen watches the running turn (console/chat/watch) or finds the reply
+// in its chat.
 //
 // Above the box you type in: always three suggestions, each a tap that runs something now. Under it:
 // quick actions, the suggestions this household keeps using (suggestions.py).
 const SENSOR = "sensor.console_cloud_agent";
 const PAGE = 10;
-const RECENT_MS = 30 * 60 * 1000;
+const REPLIES = 50;   // a chat's replies, read at a time
+const OPENING = 2;    // a chat's opening in the feed: what was asked and the reply (history.py)
 const REFRESH_MS = 5 * 60 * 1000;
-const STORE = "console-chat-thread";
 
 const STYLE = `
   :host { display: block; height: 100%; }
@@ -29,33 +34,29 @@ const STYLE = `
   .banner.offline, .banner.off { background: color-mix(in srgb, var(--secondary-text-color, #888) 16%, transparent); }
   .banner.support { background: color-mix(in srgb, var(--warning-color, #ffa600) 26%, transparent); }
   .banner a, .earlier { color: var(--primary-color); cursor: pointer; text-decoration: underline; white-space: nowrap; }
-  .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--divider-color); min-height: 28px; }
-  .bar .name { flex: 1; min-width: 0; color: var(--primary-text-color); font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bar button, .threads .head button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 14px; border: 1px solid var(--divider-color); background: none; color: var(--primary-color); cursor: pointer; white-space: nowrap; }
-  .bar button[aria-expanded="true"] { background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
-  .body { flex: 1; min-height: 0; position: relative; display: flex; }
-  .threads { position: absolute; inset: 0; z-index: 2; background: var(--card-background-color, #fff); display: flex; flex-direction: column; overflow: hidden; }
-  .threads .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px 6px; font-size: 12px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .06em; }
-  .threads .rows { flex: 1; overflow-y: auto; padding: 0 8px 10px; }
-  .thread { display: flex; align-items: stretch; gap: 4px; border-radius: 10px; }
-  .thread.on { background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
-  .thread .open { flex: 1; min-width: 0; text-align: left; border: 0; background: none; color: var(--primary-text-color); font: inherit; padding: 9px 10px; cursor: pointer; border-radius: 10px; }
-  .thread .open:hover { background: color-mix(in srgb, var(--primary-text-color) 6%, transparent); }
-  .thread .t { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .thread .s { font-size: 12px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-  .thread .x, .chip .x { border: 0; background: none; color: var(--secondary-text-color); cursor: pointer; font-size: 13px; padding: 0 10px; }
+  .post { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
+  .thread { display: flex; flex-direction: column; gap: 6px; margin-left: 40px; }
+  .first, .replies { display: flex; flex-direction: column; gap: 6px; }
+  .view, .replies .earlier { align-self: flex-start; font: inherit; font-size: 13px; font-weight: 600; border: 0; background: none; padding: 2px 0 2px 4px; color: var(--secondary-text-color); cursor: pointer; }
+  .view:hover, .replies .earlier:hover, .foot button:hover { text-decoration: underline; }
+  .av { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 700; text-transform: uppercase;
+        background: color-mix(in srgb, var(--primary-text-color) 16%, transparent); color: var(--primary-text-color); }
+  .it > .av { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .thread .av { width: 24px; height: 24px; font-size: 11px; }
+  .rbox { display: flex; gap: 8px; align-items: center; padding: 0; }
+  .rbox textarea { min-height: 34px; padding: 7px 12px; border-radius: 17px; font-size: 14px; line-height: 18px; background: var(--secondary-background-color); border-color: transparent; }
   .none { padding: 14px; color: var(--secondary-text-color); font-size: 14px; }
-  .log { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain;
+  .log { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; padding: 12px 16px 6px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain;
          user-select: text; -webkit-user-select: text; }
   .top { display: flex; justify-content: center; font-size: 12px; color: var(--secondary-text-color); min-height: 4px; }
   .hello { color: var(--secondary-text-color); font-size: 14px; line-height: 20px; }
-  .turn { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
-  .turn.me { align-self: flex-end; align-items: flex-end; }
-  .turn.it { align-self: flex-start; align-items: stretch; }
-  .msg { padding: 9px 13px; border-radius: 16px; font-size: 15px; line-height: 22px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; }
-  .me .msg { background: var(--primary-color); color: var(--text-primary-color, #fff); border-bottom-right-radius: 5px; white-space: pre-wrap; }
-  .it .msg { background: var(--secondary-background-color); color: var(--primary-text-color); border-bottom-left-radius: 5px; }
-  .it .msg.error { border: 1px solid var(--error-color, #db4437); }
+  .turn { display: flex; gap: 8px; align-items: flex-start; }
+  .cb { min-width: 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+  .bubble { max-width: 100%; padding: 7px 12px; border-radius: 16px; background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .who { display: block; font-size: 13px; font-weight: 700; line-height: 18px; }
+  .msg { font-size: 15px; line-height: 20px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; }
+  .me .msg { white-space: pre-wrap; }
+  .msg.error { color: var(--error-color, #db4437); }
   .msg > :first-child { margin-top: 0; } .msg > :last-child { margin-bottom: 0; }
   .msg p { margin: 0 0 8px; } .msg ul, .msg ol { margin: 0 0 8px; padding-left: 22px; } .msg li { margin: 2px 0; }
   .msg h3, .msg h4 { margin: 10px 0 6px; font-size: 15px; font-weight: 700; }
@@ -66,9 +67,9 @@ const STYLE = `
   .code pre code { background: none; padding: 0; }
   .copy { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-color); cursor: pointer; }
   .code .copy { position: absolute; top: 6px; right: 6px; }
-  .foot { display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--secondary-text-color); padding-left: 6px; }
-  .foot .copy { border: 0; background: none; padding: 0; text-decoration: underline; }
-  details.steps { font-size: 13px; color: var(--secondary-text-color); margin: 0 0 2px 4px; }
+  .foot { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--secondary-text-color); padding-left: 12px; }
+  .foot button, .foot .copy { font: inherit; font-size: 12px; font-weight: 700; border: 0; background: none; padding: 0; color: var(--secondary-text-color); cursor: pointer; border-radius: 0; }
+  details.steps { font-size: 12px; color: var(--secondary-text-color); margin: 0 0 0 12px; align-self: stretch; }
   details.steps summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; padding: 2px 0; }
   details.steps summary::-webkit-details-marker { display: none; }
   details.steps summary::after { content: "\\25BE"; font-size: 11px; }
@@ -187,15 +188,15 @@ class ConsoleChatCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._busy = false;      // a turn is running in the chat on screen
+    this._busy = false;      // a turn is running in one of the chats on screen
     this._loaded = false;    // the first read of the box is done
     this._banner = "";
-    this._thread = null;     // the chat on screen (null: a new one, not started)
-    this._title = "";
-    this._from = 0;          // index of the oldest message on screen, in its thread
-    this._more = false;      // whether the thread holds earlier ones
-    this._total = 0;         // how many messages the thread held when it was last read
-    this._seq = 0;           // goes up whenever the chat on screen changes: a late answer for another chat is dropped
+    this._posts = new Map(); // the chats on screen, by id
+    this._reply = null;      // the chat being replied in (null: what's typed starts a new chat)
+    this._from = 0;          // index of the oldest chat on screen, in the feed
+    this._more = false;      // whether the feed holds earlier ones
+    this._sig = "";          // the feed as it was last read: a change means read it again
+    this._seq = 0;           // goes up whenever the feed is drawn again: a late answer for the old one is dropped
     this._stop = null;       // ends the subscription to the turn being watched
     this._seenSent = "";
   }
@@ -235,19 +236,8 @@ class ConsoleChatCard extends HTMLElement {
     this._hass.connection.addEventListener("ready", () => { if (this._loaded) this._resync(true); });
     try { this._welcome = (await this._ws({ type: "console/status" })).onboarding || {}; } catch (e) { this._welcome = {}; }
     this._loadSuggested();
-    let remembered = null;
-    try { remembered = sessionStorage.getItem(STORE); } catch (e) { /* private window */ }
-    try {
-      const page = await this._ws({ type: "console/chat/history", limit: PAGE, ...(remembered ? { thread_id: remembered } : {}) });
-      const last = page.messages[page.messages.length - 1];
-      const recent = last && Date.now() - new Date(last.at).getTime() < RECENT_MS;
-      // The same sitting (this tab's chat, or one used in the last half hour): show it. Otherwise a new chat.
-      if (page.total && (remembered || recent || page.working)) this._show(page);
-      else this._setThread(null, "");
-    } catch (e) { /* nothing kept yet */ }
+    await this._loadFeed();
     this._loaded = true;
-    this._drawBar();
-    this._drawHello();
     this._bottom();
   }
 
@@ -256,11 +246,7 @@ class ConsoleChatCard extends HTMLElement {
     root.innerHTML = `<style>${STYLE}</style>
       <ha-card>
         <div class="banner" hidden></div>
-        <div class="bar"><button class="list" type="button" aria-expanded="false">Chats</button><span class="name"></span><button class="fresh" type="button">New chat</button></div>
-        <div class="body">
-          <div class="threads" hidden><div class="head"><span>Your chats</span><button class="shut" type="button">Close</button></div><div class="rows"></div></div>
-          <div class="log" role="log" aria-live="polite"><div class="top"></div><div class="hello"></div></div>
-        </div>
+        <div class="log" role="log" aria-live="polite"><div class="top"></div><div class="hello"></div></div>
         <div class="strip suggested" hidden><div class="row" role="group" aria-label="Suggestions"></div></div>
         <form><textarea rows="1" placeholder="Ask Console" aria-label="Ask Console" enterkeyhint="send"></textarea>
         <button class="send" type="submit">Send</button></form>
@@ -270,18 +256,14 @@ class ConsoleChatCard extends HTMLElement {
     this._log = root.querySelector(".log");
     this._top = root.querySelector(".top");
     this._hello = root.querySelector(".hello");
-    this._threads = root.querySelector(".threads");
     this._suggestedRow = root.querySelector(".strip.suggested");
     this._quickRow = root.querySelector(".strip.quick");
-    const area = root.querySelector("textarea");
+    const area = root.querySelector("form:not(.rbox) textarea");
     const submit = () => { const text = area.value.trim(); if (text && !this._busy && this._loaded) { area.value = ""; area.style.height = ""; this._send(text); } };
     root.querySelector("form").addEventListener("submit", (event) => { event.preventDefault(); submit(); });
     area.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } });
     area.addEventListener("input", () => { area.style.height = "auto"; area.style.height = `${Math.min(area.scrollHeight + 2, 140)}px`; });
-    root.querySelector(".bar .list").addEventListener("click", () => this._toggleThreads());
-    root.querySelector(".bar .fresh").addEventListener("click", () => this._newChat());
-    root.querySelector(".threads .shut").addEventListener("click", () => this._toggleThreads(false));
-    // Earlier messages of this chat come when the person pulls up past the top.
+    // Earlier chats come when the person pulls up past the top.
     this._log.addEventListener("wheel", (event) => { if (event.deltaY < 0 && this._log.scrollTop < 2) this._earlier(); }, { passive: true });
     let touchY = null;
     this._log.addEventListener("touchstart", (event) => { touchY = this._log.scrollTop < 2 ? event.touches[0].clientY : null; }, { passive: true });
@@ -289,7 +271,6 @@ class ConsoleChatCard extends HTMLElement {
     // A suggestion counts as seen when it is really on screen, not when the dashboard merely holds this card.
     if (window.IntersectionObserver) new IntersectionObserver((entries) => { this._onScreen = entries.some((entry) => entry.isIntersecting); this._seen(); }).observe(this._suggestedRow);
     else this._onScreen = true;
-    this._drawBar();
   }
 
   _drawBanner(sensor) {
@@ -306,13 +287,9 @@ class ConsoleChatCard extends HTMLElement {
     banner.appendChild(link);
   }
 
-  _drawBar() {
-    const root = this.shadowRoot;
-    root.querySelector(".bar .name").textContent = this._thread ? this._title || "Chat" : "New chat";
-    root.querySelector(".bar .fresh").hidden = !this._thread && !this._log.querySelector(".turn");
-    root.querySelector(".bar .list").setAttribute("aria-expanded", this._threads.hidden ? "false" : "true");
+  _drawTop() {
     this._top.replaceChildren();
-    if (this._more) { const earlier = el("span", "earlier", "Load earlier messages"); earlier.addEventListener("click", () => this._earlier()); this._top.appendChild(earlier); }
+    if (this._more) { const earlier = el("span", "earlier", "Load earlier chats"); earlier.addEventListener("click", () => this._earlier()); this._top.appendChild(earlier); }
   }
 
   _drawHello() {
@@ -396,22 +373,20 @@ class ConsoleChatCard extends HTMLElement {
   async _tap(item) {
     if (this._busy || !this._loaded) return;
     this._busy = true;
-    const seq = this._seq;
+    const seq = this._seq, into = null;   // a tap under the feed is a new chat
     let done = null, failed = null;
-    try { done = await this._ws({ type: "console/suggestions/tap", suggestion_id: item.id, thread_id: this._thread }); } catch (e) { failed = String(e.message || e); }
+    try { done = await this._ws({ type: "console/suggestions/tap", suggestion_id: item.id, thread_id: into ? into.id : null }); } catch (e) { failed = String(e.message || e); }
     this._busy = false;
     if (done && done.ask) { this._send(done.ask); this._loadSuggested(); return; }   // something to ask: sent like any message
     if (seq !== this._seq) return;
-    const was = this._atBottom();
-    this._hello.remove();
-    this._log.appendChild(this._turn("me", `Run “${item.name}”`).node);
+    const post = await this._postFor(into, `Run “${item.name}”`);
+    this._append(post, this._turn("me", `Run “${item.name}”`, { post }));
     if (done) {
-      this._setThread(done.thread_id, this._title || `Run “${item.name}”`);
-      this._total += 2;
-      this._log.appendChild(this._stored({ who: "console", text: done.reply, steps: [{ title: "Ran at home", detail: "A tap on a suggestion: no AI, no internet." }], meta: { route: "local" } }).node);
-    } else this._log.appendChild(this._turn("it", failed, { error: true }).node);
-    this._follow(was || true);
-    this._drawBar();
+      this._name(post, done.thread_id);
+      this._append(post, this._stored({ who: "console", text: done.reply, steps: [{ title: "Ran at home", detail: "A tap on a suggestion: no AI, no internet." }], meta: { route: "local" } }, post));
+    } else this._append(post, this._turn("it", failed, { error: true, post }));
+    this._drawActs(post);
+    post.node.scrollIntoView({ block: "nearest" });
     this._loadSuggested();
   }
 
@@ -420,12 +395,124 @@ class ConsoleChatCard extends HTMLElement {
     this._loadSuggested();
   }
 
-  // --- chats as threads ---------------------------------------------------------------------------
+  // --- the feed, and each chat a thread inside it ----------------------------------------------------
 
-  _setThread(id, title) {
-    this._thread = id || null;
-    if (title !== undefined) this._title = title;
-    try { if (id) sessionStorage.setItem(STORE, id); else sessionStorage.removeItem(STORE); } catch (e) { /* private window */ }
+  // One chat in the feed, as a comment thread: the ask on top, then, indented under it, Console's answer,
+  // the rest of the replies (closed until asked for) and the box to reply in.
+  _post(chat) {
+    const node = el("div", "post"), top = el("div", "top"), thread = el("div", "thread"), first = el("div", "first"), replies = el("div", "replies");
+    const post = { id: chat.id || null, title: chat.title || "", count: 0, node, top, first, replies, open: false, from: null };
+    replies.hidden = true;
+    post.view = el("button", "view"); post.view.type = "button";
+    post.view.addEventListener("click", () => { if (post.open) this._closeReplies(post); else this._openReplies(post); });
+    post.box = el("form", "rbox"); post.box.hidden = true;
+    const area = el("textarea"); area.rows = 1; area.placeholder = "Reply in this thread…"; area.setAttribute("aria-label", "Reply in this thread"); area.enterKeyHint = "send";
+    const submit = () => { const text = area.value.trim(); if (text && !this._busy && this._loaded) { area.value = ""; this._send(text, post); } };
+    post.box.addEventListener("submit", (event) => { event.preventDefault(); submit(); });
+    area.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } if (event.key === "Escape") this._setReply(null); });
+    post.box.append(this._avatar("me"), area);
+    thread.append(first, post.view, replies, post.box);
+    node.append(top, thread);
+    for (const message of chat.opening || []) this._append(post, this._stored(message, post));
+    post.count = chat.count || post.count;
+    if (post.id) this._posts.set(post.id, post);
+    this._drawActs(post);
+    return post;
+  }
+
+  _drawActs(post) {
+    const more = Math.max(0, post.count - OPENING);
+    post.view.hidden = !more;
+    post.view.textContent = post.open ? "Hide replies" : `View ${more} more ${more === 1 ? "reply" : "replies"}`;
+  }
+
+  // A chat learns its id from the box when its first turn starts.
+  _name(post, id) {
+    if (!id || post.id === id) return;
+    post.id = id;
+    this._posts.set(id, post);
+  }
+
+  // Put a comment into a chat on screen: the ask on top, the answer under it, then its replies.
+  _append(post, turn) {
+    if (post.count === 0) {
+      post.top.appendChild(turn.node);
+      const gone = el("button", "", "Delete"); gone.type = "button";
+      gone.addEventListener("click", () => this._delete(post));
+      turn.foot.appendChild(gone);
+    } else if (post.count < OPENING) post.first.appendChild(turn.node);
+    else { post.replies.hidden = false; post.open = true; if (post.from === null) post.from = OPENING; post.replies.appendChild(turn.node); }
+    post.count += 1;
+  }
+
+  // The chat a message goes into: the one being replied in (with its replies open), or a new one at the
+  // bottom of the feed.
+  async _postFor(into, title) {
+    this._hello.remove();
+    if (into) { await this._openReplies(into); return into; }
+    const post = this._post({ title: title.length > 60 ? `${title.slice(0, 59).trimEnd()}…` : title });
+    this._log.appendChild(post.node);
+    this._bottom();
+    return post;
+  }
+
+  // A chat's own history, opened in place: its newest replies, and a way to the earlier ones.
+  async _openReplies(post) {
+    if (post.open) return;
+    post.open = true;
+    post.replies.hidden = false;
+    if (post.from === null && post.id && post.count > OPENING) await this._moreReplies(post);
+    else if (post.from === null) post.from = OPENING;
+    this._drawActs(post);
+  }
+
+  _closeReplies(post) {
+    post.open = false;
+    post.replies.hidden = true;
+    this._drawActs(post);
+  }
+
+  async _moreReplies(post) {
+    const seq = this._seq;
+    let page = null;
+    try { page = await this._ws({ type: "console/chat/history", thread_id: post.id, limit: REPLIES, ...(post.from !== null ? { before: post.from } : {}) }); } catch (e) { /* nothing more to show */ }
+    if (seq !== this._seq) return;
+    const earlier = post.replies.querySelector(".earlier");
+    if (earlier) earlier.remove();
+    if (!page) { if (post.from === null) post.from = OPENING; return; }
+    const start = Math.max(page.from, OPENING);   // the opening is already in the feed
+    const first = post.replies.firstChild;
+    for (const message of page.messages.slice(start - page.from)) post.replies.insertBefore(this._stored(message, post).node, first);
+    if (post.from === null) post.count = page.total;
+    post.from = start;
+    if (start > OPENING) {
+      const link = el("button", "earlier", "Show earlier replies"); link.type = "button";
+      link.addEventListener("click", () => this._moreReplies(post));
+      post.replies.insertBefore(link, post.replies.firstChild);
+    }
+  }
+
+  // Reply: open that thread's own box (one at a time). What's written there goes into that chat alone.
+  _setReply(post) {
+    const was = this._reply;
+    this._reply = post && post.id ? post : null;
+    if (was && was !== this._reply) was.box.hidden = true;
+    if (!this._reply) return;
+    post.box.hidden = false;
+    this._openReplies(post).then(() => { post.box.scrollIntoView({ block: "nearest" }); post.box.querySelector("textarea").focus(); });
+  }
+
+  async _delete(post) {
+    if (!confirm(`Delete the chat “${post.title || "Chat"}” from this box? It can't be brought back.`)) return;
+    if (post.id) { try { await this._ws({ type: "console/chat/thread/delete", thread_id: post.id }); } catch (e) { /* gone already */ } this._posts.delete(post.id); }
+    if (this._reply === post) this._setReply(null);
+    post.node.remove();
+    if (!this._log.querySelector(".post")) this._showHello();
+  }
+
+  _showHello() {
+    if (!this._hello.isConnected) this._top.after(this._hello);
+    this._drawHello();
   }
 
   _clear() {
@@ -433,92 +520,59 @@ class ConsoleChatCard extends HTMLElement {
     if (this._stop) { try { this._stop(); } catch (e) { /* already closed */ } this._stop = null; }
     this._busy = false;
     this.shadowRoot.querySelector("button.send").disabled = false;
-    this._log.querySelectorAll(".turn").forEach((node) => node.remove());
-    this._from = 0; this._more = false; this._total = 0;
+    this._log.querySelectorAll(".post").forEach((node) => node.remove());
+    this._posts.clear();
+    this._from = 0; this._more = false;
   }
 
-  // Put one page of a thread on screen (the newest), and watch its turn if one is running.
-  _show(page) {
+  static _signature(feed) { return feed.chats.map((chat) => `${chat.id}:${chat.count}:${chat.working ? 1 : 0}`).join("|") + `/${feed.total}`; }
+
+  // Draw the feed from the box: its newest chats, each closed on its opening, except the ones that were
+  // open (and the one being replied in), which open again. A turn running in one of them is watched.
+  async _loadFeed() {
+    let feed = null;
+    try { feed = await this._ws({ type: "console/chat/feed", limit: PAGE }); } catch (e) { /* nothing kept yet, or still offline */ }
+    if (!feed) { if (!this._loaded) this._showHello(); return; }
+    const open = [...this._posts.values()].filter((post) => post.open).map((post) => post.id);
+    const replying = this._reply && this._reply.id;
     this._clear();
-    this._setThread(page.thread_id, page.title);
-    for (const message of page.messages) this._log.appendChild(this._stored(message).node);
-    this._from = page.from; this._more = page.more;
-    this._total = page.total - (page.working ? 1 : 0);   // the running turn adds its two when it ends
-    this._hello.remove();
-    if (page.working) this._watch();
-    this._drawBar();
-    this._bottom();
+    this._reply = null;
+    for (const chat of feed.chats) this._log.appendChild(this._post(chat).node);
+    this._from = feed.from; this._more = feed.more; this._sig = ConsoleChatCard._signature(feed);
+    if (feed.chats.length) this._hello.remove(); else this._showHello();
+    this._drawTop();
+    const seq = this._seq;
+    for (const id of open) if (this._posts.has(id)) await this._openReplies(this._posts.get(id));
+    if (seq !== this._seq) return;
+    if (replying && this._posts.get(replying)) this._setReply(this._posts.get(replying));
+    const working = feed.chats.filter((chat) => chat.working).pop();
+    if (working) await this._watch(this._posts.get(working.id));
   }
 
-  async _open(id) {
-    this._toggleThreads(false);
-    try { this._show(await this._ws({ type: "console/chat/history", thread_id: id, limit: PAGE })); }
-    catch (e) { this._newChat(); }
-  }
-
-  _newChat() {
-    this._toggleThreads(false);
-    this._clear();
-    this._setThread(null, "");
-    if (!this._hello.isConnected) this._top.after(this._hello);
-    this._drawBar();
-    this._drawHello();
-  }
-
-  // The chat on screen, read again from the box: after a reconnect, or when the page comes back into
-  // view. A turn that finished meanwhile shows its reply; one still running is watched.
+  // The feed, read again from the box: after a reconnect, or when the page comes back into view. A turn
+  // that finished meanwhile shows its reply; one still running is watched.
   async _resync(force) {
     if (this._busy && !force) return;
-    if (!this._thread && !this._busy) { this._loadSuggested(); return; }
-    const id = this._thread;
-    try {
-      const page = await this._ws({ type: "console/chat/history", limit: PAGE, ...(id ? { thread_id: id } : {}) });
-      if (id !== this._thread) return;
-      if (force || page.working || page.total !== this._total) { if (page.total) this._show(page); else this._newChat(); }
-    } catch (e) { /* still offline: the next "ready" tries again */ }
+    let changed = force;
+    if (!changed) {
+      try { changed = ConsoleChatCard._signature(await this._ws({ type: "console/chat/feed", limit: PAGE })) !== this._sig; } catch (e) { return; }
+    }
+    if (changed) { const was = this._atBottom(); await this._loadFeed(); this._follow(was); }
     this._loadSuggested();
   }
 
-  async _toggleThreads(open) {
-    const show = open === undefined ? this._threads.hidden : open;
-    this._threads.hidden = !show;
-    this._drawBar();
-    if (!show) return;
-    const rows = this._threads.querySelector(".rows");
-    rows.replaceChildren(el("div", "none", "Loading…"));
-    let threads = [];
-    try { threads = (await this._ws({ type: "console/chat/threads" })).threads; } catch (e) { /* none to show */ }
-    rows.replaceChildren();
-    if (!threads.length) rows.appendChild(el("div", "none", "No chats yet. What you ask Console is kept here, on this box only."));
-    for (const thread of threads) {
-      const row = el("div", `thread${thread.id === this._thread ? " on" : ""}`);
-      const open_ = el("button", "open"); open_.type = "button";
-      open_.append(el("div", "t", thread.title || "Chat"), el("div", "s", `${thread.working ? "Working… · " : ""}${ago(thread.at)} · ${thread.last || ""}`));
-      open_.addEventListener("click", () => this._open(thread.id));
-      const x = el("button", "x", "✕"); x.type = "button"; x.title = "Delete this chat"; x.setAttribute("aria-label", `Delete the chat ${thread.title}`);
-      x.addEventListener("click", async () => {
-        if (!confirm(`Delete the chat “${thread.title || "Chat"}” from this box? It can't be brought back.`)) return;
-        try { await this._ws({ type: "console/chat/thread/delete", thread_id: thread.id }); } catch (e) { /* gone already */ }
-        if (thread.id === this._thread) this._newChat();
-        this._toggleThreads(true);
-      });
-      row.append(open_, x);
-      rows.appendChild(row);
-    }
-  }
-
   async _earlier() {
-    if (!this._more || this._loading || !this._thread) return;
+    if (!this._more || this._loading) return;
     this._loading = true;
     const seq = this._seq;
     try {
-      const page = await this._ws({ type: "console/chat/history", thread_id: this._thread, before: this._from, limit: PAGE });
+      const feed = await this._ws({ type: "console/chat/feed", before: this._from, limit: PAGE });
       if (seq === this._seq) {
-        const first = this._log.querySelector(".turn");
+        const first = this._log.querySelector(".post");
         const height = this._log.scrollHeight;
-        for (const message of page.messages) this._log.insertBefore(this._stored(message).node, first);
-        this._from = page.from; this._more = page.more;
-        this._drawBar();
+        for (const chat of feed.chats) if (!this._posts.has(chat.id)) this._log.insertBefore(this._post(chat).node, first);
+        this._from = feed.from; this._more = feed.more;
+        this._drawTop();
         this._log.scrollTop = this._log.scrollHeight - height;   // stay where the person was reading
       }
     } catch (e) { /* nothing earlier to show */ }
@@ -527,19 +581,35 @@ class ConsoleChatCard extends HTMLElement {
 
   // --- one message on screen ----------------------------------------------------------------------
 
+  _avatar(who) {
+    const name = who === "me" ? this._me() : "Console";
+    const av = el("div", "av", name.slice(0, 1)); av.setAttribute("aria-hidden", "true");
+    return av;
+  }
+
+  _me() { return (this._hass && this._hass.user && this._hass.user.name) || "You"; }
+
+  // One comment: avatar, then the name and the words in a bubble, and under it when, Reply and Copy.
   _turn(who, text, opts = {}) {
-    const node = el("div", `turn ${who}`);
+    const node = el("div", `turn ${who}`), body = el("div", "cb"), shell = el("div", "bubble");
     const bubble = el("div", `msg${opts.error ? " error" : ""}`);
     if (who === "me") bubble.textContent = text; else markdown(bubble, text);
-    node.appendChild(bubble);
+    shell.append(el("span", "who", who === "me" ? this._me() : "Console"), bubble);
     const foot = el("div", "foot");
-    const turn = { node, bubble, foot, text };
+    foot.appendChild(el("span", "", opts.at ? ago(opts.at) : "just now"));
+    const turn = { node, body, bubble, foot, text };
+    if (opts.post) {
+      const reply = el("button", "", "Reply"); reply.type = "button";
+      reply.addEventListener("click", () => this._setReply(opts.post));
+      foot.appendChild(reply);
+    }
     if (who === "it") {
       const copy = el("button", "copy", "Copy"); copy.type = "button";
       copy.addEventListener("click", () => copyText(turn.text, copy));
       foot.appendChild(copy);
-      node.appendChild(foot);
     }
+    body.append(shell, foot);
+    node.append(this._avatar(who), body);
     return turn;
   }
 
@@ -549,7 +619,7 @@ class ConsoleChatCard extends HTMLElement {
     const steps = el("details", "steps"), summary = el("summary"), list = el("div", "steplist");
     const dot = el("span", "dot"), label = el("span", "", "Working…");
     summary.append(dot, label); steps.append(summary, list);
-    turn.node.insertBefore(steps, turn.bubble);
+    turn.body.appendChild(steps);
     const work = { steps, list, dot, label, count: 0, byKey: new Map(), thinking: null };
     work.add = (cls, title) => { const row = el("div", `step ${cls}`), t = el("div", "t", title), d = el("div", "d"); row.append(t, d); list.appendChild(row); work.count += 1; return { row, t, d }; };
     work.think = (text) => {
@@ -574,9 +644,9 @@ class ConsoleChatCard extends HTMLElement {
   }
 
   // A message as the box keeps it. Console's replies come with their steps.
-  _stored(message) {
-    if (message.who === "you") return this._turn("me", message.text);
-    const turn = this._turn("it", message.text, { error: message.failed });
+  _stored(message, post) {
+    if (message.who === "you") return this._turn("me", message.text, { at: message.at, post });
+    const turn = this._turn("it", message.text, { error: message.failed, at: message.at, post });
     const work = this._work(turn);
     for (const step of message.steps || []) {
       if (step.kind === "think") { work.thinking = null; work.think(step.detail || ""); continue; }
@@ -596,16 +666,16 @@ class ConsoleChatCard extends HTMLElement {
   // --- a turn as it happens -----------------------------------------------------------------------
 
   // The reply being written: its work as it happens, then its words. Returns what to do with each event.
-  _live() {
+  _live(post) {
     const seq = this._seq;
     const send = this.shadowRoot.querySelector("button.send");
     this._busy = true;
     send.disabled = true;
-    const turn = this._turn("it", "");
+    const turn = this._turn("it", "", { post });
     turn.bubble.hidden = true; turn.foot.hidden = true;
     const work = this._work(turn);
-    this._log.appendChild(turn.node);
-    this._bottom();
+    this._append(post, turn);
+    turn.node.scrollIntoView({ block: "nearest" });
     const started = performance.now();
     let streamed = "", meta = {}, frame = 0, done = false;
     const paint = () => { frame = 0; const was = this._atBottom(); turn.bubble.hidden = !streamed; if (streamed) markdown(turn.bubble, streamed); this._follow(was); };
@@ -615,26 +685,26 @@ class ConsoleChatCard extends HTMLElement {
       if (done) return;
       done = true;
       if (frame) cancelAnimationFrame(frame);
-      if (seq !== this._seq) return;   // the person moved to another chat: this reply is in its own thread
+      if (seq !== this._seq) return;   // the feed was drawn again meanwhile: this reply is in its chat
       const was = this._atBottom();
       turn.text = event.reply || streamed || "Done.";
       markdown(turn.bubble, turn.text);
       turn.bubble.hidden = false; turn.foot.hidden = false;
       if (event.error) turn.bubble.classList.add("error");
-      if (event.thread_id) this._setThread(event.thread_id);
+      this._name(post, event.thread_id);
       work.close(meta, event.ms || performance.now() - started);
       this._busy = false; send.disabled = false;
-      this._total += 2;
+      this._sig = "";   // the feed on the box moved on: the next look reads it again
       if (this._stop) { try { this._stop(); } catch (e) { /* already closed */ } this._stop = null; }
+      this._drawActs(post);
       this._follow(was);
-      this._drawBar();
       this._loadSuggested();   // the house may look different now: what's worth suggesting too
     };
 
     const onEvent = (event) => {
       if (seq !== this._seq || done) return;
       const was = this._atBottom();
-      if (event.kind === "thread") { this._setThread(event.thread_id); this._drawBar(); }
+      if (event.kind === "thread") this._name(post, event.thread_id);
       else if (event.kind === "step") {
         let step = work.byKey.get(event.key);
         if (!step) { step = work.add("", event.title || "Step"); work.byKey.set(event.key, step); if (event.detail) step.d.textContent = event.detail; }
@@ -648,14 +718,14 @@ class ConsoleChatCard extends HTMLElement {
       else if (event.kind === "reset") { streamed = ""; repaint(); }
       else if (event.kind === "meta") { meta = event; }
       else if (event.kind === "done") { finish(event); }
-      else if (event.kind === "gone") { done = true; turn.node.remove(); this._busy = false; send.disabled = false; this._resync(true); }   // it ended a moment ago: read the thread
+      else if (event.kind === "gone") { done = true; turn.node.remove(); post.count -= 1; this._busy = false; send.disabled = false; this._resync(true); }   // it ended a moment ago: read the feed
       this._follow(was);
     };
     return { onEvent, finish, seq };
   }
 
   // One message is one turn: `resubscribe: false` keeps Home Assistant from sending the command again
-  // when the connection comes back. The "ready" listener reads the chat from the box instead.
+  // when the connection comes back. The "ready" listener reads the feed from the box instead.
   async _subscribe(live, message) {
     try {
       const stop = await this._hass.connection.subscribeMessage(live.onEvent, message, { resubscribe: false });
@@ -665,21 +735,25 @@ class ConsoleChatCard extends HTMLElement {
     }
   }
 
-  async _send(text) {
+  // What's typed in a thread's own box goes into that chat; what's typed under the feed starts a new chat.
+  async _send(text, into) {
     if (this._busy || !this._hass) return;
-    const was = this._title;
-    this._hello.remove();
-    this._log.appendChild(this._turn("me", text).node);
-    if (!this._thread) this._title = text.length > 60 ? `${text.slice(0, 59).trimEnd()}…` : text;
-    const live = this._live();
-    this._drawBar();
-    await this._subscribe(live, { type: "console/chat", text, thread_id: this._thread });
-    if (!this._thread && !this._busy) this._title = was;
+    this._busy = true;   // held from here: opening a chat's replies may take a moment
+    const seq = this._seq;
+    const post = await this._postFor(into || null, text);
+    if (seq !== this._seq) { this._busy = false; return; }
+    this._append(post, this._turn("me", text, { post }));
+    this._drawActs(post);
+    await this._subscribe(this._live(post), { type: "console/chat", text, thread_id: post.id });
   }
 
-  // A turn already running in this chat (the card reloaded, reconnected, or opened it on another screen).
-  _watch() {
-    this._subscribe(this._live(), { type: "console/chat/watch", thread_id: this._thread });
+  // A turn already running in a chat (the card reloaded, reconnected, or opened the feed on another screen).
+  async _watch(post) {
+    if (!post) return;
+    const seq = this._seq;
+    if (post.count > OPENING) await this._openReplies(post);
+    if (seq !== this._seq) return;
+    await this._subscribe(this._live(post), { type: "console/chat/watch", thread_id: post.id });
   }
 }
 
@@ -701,7 +775,7 @@ if (!window.customCards.some((card) => card.type === NAME)) {
   window.customCards.push({
     type: "console-chat-card",
     name: "Console chat",
-    description: "Talk to Console, this home's agent: your chats as threads with the work behind each reply, suggestions to tap, and quick actions.",
+    description: "Talk to Console, this home's agent: one feed of your chats, each a thread you can reply in, with the work behind each reply, suggestions to tap, and quick actions.",
     preview: false,
   });
 }
