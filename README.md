@@ -6,8 +6,8 @@ Console is the opinionated way to run a home on [Home Assistant](https://www.hom
 - **Console's agent** (`conversation.console`), for Assist and for the chat card. It answers at home
   when Home Assistant's own agent knows the command (no model, no internet), and otherwise uses the
   household's cloud agent with Sunrise's tools.
-- **A chat card** for your dashboards (`custom:console-chat-card`): your chats as threads, each with the
-  work behind Console's replies; three suggestions to tap; and quick actions for the ones you keep using.
+- **A chat card** for your dashboards (`custom:console-chat-card`): one feed of your chats, each a thread you
+  can reply in, with the work behind Console's replies; three suggestions to tap; and quick actions for the ones you keep using.
 - **Console settings** in the sidebar: your plan, this month's usage, exactly what is sent out, and a
   switch for each AI feature with what it tends to cost.
 - **Music Assistant** in the sidebar, for admins, when Home Assistant has a Music Assistant: its own app
@@ -42,17 +42,22 @@ Until then the card says the cloud agent isn't connected, and plain commands sti
 If the cloud agent can't be used (the month's allowance is spent, the relay has been out of reach for
 longer than a key lasts, or the model fails) the person is told so, and step 1 keeps working.
 
-## Chats are threads
+## One feed of chats, each its own thread
 
-Each chat is its own thread. **Chats** at the top of the card lists them, newest first; open one and the
-whole of it is there, ten messages at a time from the newest, with a line under each reply that opens into
-the work behind it: where the request went and why, the model's thinking, each tool it used and what came
-back. A chat used in the last half hour opens by itself; otherwise the card starts a new one.
+The card is one history: a feed of your chats in the order you started them, like a feed and its comments.
 
-- Threads are kept on the box only, per signed-in person: the newest 40 chats, 200 messages each. ✕ beside
-  a chat deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
+- **What you type starts a new chat** at the bottom of the feed.
+- **Each chat shows its opening**: what you asked and Console's reply, with a line that opens into the work
+  behind it (where the request went and why, the model's thinking, each tool it used and what came back).
+- **Reply** under a chat carries on inside it. Your replies and Console's are nested under that chat, and
+  **only that chat's messages are given to the model**: nothing from the rest of the feed. The box says
+  which chat you're replying in until you choose **New chat instead**.
+- **View replies** opens a chat's own history in place, the newest fifty first. A reply doesn't move its
+  chat in the feed. Earlier chats load ten at a time when you pull up past the top.
+- Chats are kept on the box only, per signed-in person: the newest 200 chats, 200 messages each. ✕ on a
+  chat deletes it; Console settings deletes all of yours; the data wipe erases everyone's.
 - A turn runs on the box whoever is watching. If the card reloads, the phone sleeps or the connection
-  drops, the reply still lands in its thread, and a card that opens the chat meanwhile picks the turn up as
+  drops, the reply still lands in its chat, and a card that opens the feed meanwhile picks the turn up as
   it happens. One message is always one turn: nothing is sent again when the connection comes back.
 
 ## Suggestions and quick actions

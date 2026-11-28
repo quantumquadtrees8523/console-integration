@@ -1,4 +1,11 @@
-"""The chat card's history: every chat a person has had with Console, each one a thread of its own.
+"""The chat card's history: one feed of every chat a person has had with Console, each chat a thread of
+its own inside it (owner, 2026-11-28: "one macro history with nested chats inside ... a feed of chats and
+each chat has its own mini history", like a feed and its comments).
+
+The feed is the chats in the order they were started. A chat's opening (the first thing asked and the
+reply to it) is what the feed shows; what was said after that is the chat's replies, read a page at a
+time when the person opens them. A message with no chat named starts a new chat; a reply names its chat,
+and only that chat's messages are the model's context.
 
 A thread holds what was said and, with each of Console's replies, the work behind it (where the request
 went, the thinking, each tool and what came back), so opening a chat again shows the whole of it.
@@ -20,7 +27,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 KEEP = 200  # messages in one thread
-THREADS = 40  # threads per person
+THREADS = 200  # threads per person: in a feed, every new ask is a thread
+OPENING = 2  # a chat's opening, shown in the feed: what was asked and the reply to it
 PAGE = 10
 TEXT_MAX = 8000
 TITLE_MAX = 60
@@ -77,6 +85,16 @@ class ChatHistory:
             rows.append({"id": thread["id"], "title": thread["title"], "at": thread.get("at"), "made": thread.get("made"),
                          "count": len(thread["messages"]), "last": _title(last.get("text") or "")})
         return sorted(rows, key=lambda row: row["at"] or "", reverse=True)
+
+    def feed(self, user_id: str, before: int | None = None, limit: int = PAGE) -> dict[str, Any]:
+        """Up to `limit` of this person's chats in the order they were started, ending just before index
+        `before` (the newest when None), oldest first. Each with its opening and how many replies follow."""
+        mine = sorted(self.people.get(user_id, []), key=lambda t: t.get("made") or "")
+        end = len(mine) if before is None else max(0, min(before, len(mine)))
+        start = max(0, end - limit)
+        chats = [{"id": t["id"], "title": t["title"], "made": t.get("made"), "at": t.get("at"), "count": len(t["messages"]),
+                  "opening": t["messages"][:OPENING], "replies": max(0, len(t["messages"]) - OPENING)} for t in mine[start:end]]
+        return {"chats": chats, "from": start, "more": start > 0, "total": len(mine)}
 
     def add(self, user_id: str, who: str, text: str, thread_id: str | None = None, **extra: Any) -> str | None:
         """Add one message to a thread (a new thread when it names none, or one that isn't there).

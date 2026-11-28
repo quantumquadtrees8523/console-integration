@@ -191,6 +191,41 @@ async def test_chats_are_listed_newest_first_and_one_can_be_deleted(hass, consol
     assert [t["id"] for t in (await client.receive_json())["result"]["threads"]] == [first["thread_id"]]
 
 
+async def test_the_feed_is_every_chat_in_order_each_with_its_opening_and_its_replies_counted(hass, console, model, hass_ws_client):
+    """Owner, 2026-11-28: "one macro history with nested chats inside ... a feed of chats and each chat has
+    its own mini history. i should be able to reply within that thread and only that thread's convo is
+    added to context"."""
+    link(console)
+    client = await hass_ws_client(hass)
+    model.say("Roses like sun. [[other]]")
+    roses, _ = await chat(hass, hass_ws_client, "where should the roses go in the garden", client)
+    model.say("Tuesday. [[other]]")
+    bins, _ = await chat(hass, hass_ws_client, "when is the recycling collected on our street", client)
+    model.say("By the south wall. [[other]]")
+    await chat(hass, hass_ws_client, "and which wall is sunniest", client, thread_id=roses["thread_id"])  # a reply in the first chat
+
+    await client.send_json({"id": 970, "type": "console/chat/feed"})
+    feed = (await client.receive_json())["result"]
+    assert [c["id"] for c in feed["chats"]] == [roses["thread_id"], bins["thread_id"]]  # the order they were started: a reply moves nothing
+    first, second = feed["chats"]
+    assert [m["text"] for m in first["opening"]] == ["where should the roses go in the garden", "Roses like sun."]
+    assert (first["count"], first["replies"], first["working"]) == (4, 2, False) and (second["count"], second["replies"]) == (2, 0)
+    assert feed["total"] == 2 and feed["more"] is False
+    # The reply's turn was given its own chat and nothing of the other one.
+    sent = [m["content"] for m in model.calls[-1]["messages"] if m["role"] in ("user", "assistant")]
+    assert "and which wall is sunniest" in sent and not [text for text in sent if "recycling" in str(text) or "Tuesday" in str(text)]
+    # The replies are the chat's own page, after its opening.
+    await client.send_json({"id": 971, "type": "console/chat/history", "thread_id": roses["thread_id"], "limit": 50})
+    page = (await client.receive_json())["result"]
+    assert [m["text"] for m in page["messages"][2:]] == ["and which wall is sunniest", "By the south wall."]
+    # A page at a time from the newest.
+    await client.send_json({"id": 972, "type": "console/chat/feed", "limit": 1})
+    newest = (await client.receive_json())["result"]
+    assert [c["id"] for c in newest["chats"]] == [bins["thread_id"]] and newest["more"] is True and newest["from"] == 1
+    await client.send_json({"id": 973, "type": "console/chat/feed", "limit": 1, "before": newest["from"]})
+    assert [c["id"] for c in (await client.receive_json())["result"]["chats"]] == [roses["thread_id"]]
+
+
 async def test_a_history_from_before_threads_becomes_one_chat(hass, console):
     from custom_components.console.history import EARLIER, ChatHistory
 
@@ -417,13 +452,16 @@ async def test_the_card_shows_thinking_as_one_line_with_the_rest_a_tap_away(hass
     assert '"Show all"' in script and "thinking.d.textContent += event.text" not in script
 
 
-async def test_the_card_keeps_one_turn_one_message_and_shows_chats_as_threads(hass, console, hass_client):
+async def test_the_card_keeps_one_turn_one_message_and_shows_a_feed_of_chats_to_reply_in(hass, console, hass_client):
     """What the card must do for the server's promises to hold: never send a message again when its
-    connection comes back, pick a running turn up by watching it, and page within one chat."""
+    connection comes back, pick a running turn up by watching it, draw the feed, open a chat's replies in
+    place, and send a reply into its own chat (and a new ask into none)."""
     client = await hass_client()
     script = await (await client.get("/console_static/console-chat-card.js")).text()
     assert "resubscribe: false" in script  # Home Assistant would otherwise send the chat command again on reconnect
     assert '"console/chat/watch"' in script and 'addEventListener("ready"' in script
-    assert '"console/chat/threads"' in script and '"console/chat/thread/delete"' in script
-    assert "thread_id: this._thread" in script
+    assert '"console/chat/feed"' in script and '"console/chat/thread/delete"' in script
+    assert '"console/chat/history", thread_id: post.id' in script  # a chat's replies, read when it's opened
+    assert "this._postFor(this._reply, text)" in script and "thread_id: post.id }" in script
+    assert '"console/chat/threads"' not in script  # no switcher: the feed is the one history
     assert '"console/suggestions/seen"' in script and "_drawSuggested" in script and "_drawQuick" in script

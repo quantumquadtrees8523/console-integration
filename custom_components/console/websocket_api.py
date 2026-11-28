@@ -59,6 +59,7 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_features_set,
         ws_usage_paths,
         ws_update_now,
+        ws_chat_feed,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -349,6 +350,26 @@ def ws_chat_history(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     page = data.history.page(connection.user.id, msg.get("thread_id"), msg.get("before"), msg["limit"])
     live = data.live.get(page["thread_id"])
     connection.send_result(msg["id"], page | {"working": bool(live and live.user_id == connection.user.id)})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "console/chat/feed",
+        vol.Optional("before"): vol.Any(vol.Coerce(int), None),
+        vol.Optional("limit", default=10): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+    }
+)
+@callback
+def ws_chat_feed(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """This person's feed: their chats in the order they were started, a page at a time from the newest,
+    each with its opening (what was asked and the reply) and how many replies follow. A chat's replies are
+    read with console/chat/history; `working` says a turn is running in it right now."""
+    data = hass.data[DOMAIN]
+    feed = data.history.feed(connection.user.id, msg.get("before"), msg["limit"])
+    for chat in feed["chats"]:
+        live = data.live.get(chat["id"])
+        chat["working"] = bool(live and live.user_id == connection.user.id)
+    connection.send_result(msg["id"], feed)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/chat/thread/delete", vol.Required("thread_id"): str})
