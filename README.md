@@ -84,6 +84,28 @@ What was said only, not the steps.
   is always one turn: nothing is sent again when the connection comes back.
 - A tap on a suggestion goes into the conversation open in the drawer, or starts one of its own.
 
+## Device settings Console learns
+
+Console remembers the volume you want each speaker at and the brightness you want each light at, and uses
+them whenever you don't name a level.
+
+- **From your chats.** Say "the music's too loud in the kitchen, turn it down" (by chat, voice or Assist)
+  and Console keeps the level the speaker ends up at.
+- **From what you do by hand.** Turn the speaker's own knob or drag the slider in the app, and Console keeps
+  the level you leave it at, once you stop adjusting.
+- **Corrections count most.** Change a device within 10 minutes of Console setting it, and your level
+  replaces the one Console chose.
+- **What doesn't count:** a level Console picked itself without being asked, and changes made by routines
+  and scripts.
+
+A device's level is the middle of its last 5, so one loud song doesn't move it. Console is told each one on
+every request, and starts music on a speaker at that speaker's volume ("play some jazz in the kitchen").
+Whatever you ask for at the time always wins.
+
+They're listed in Console settings under **What the house knows about you**, where an administrator can
+forget one. **Learn device settings** under AI features turns it off (it's free: no AI is used). Console
+keeps each device's last few levels, when and how; never what anyone said, and none of it goes to the relay.
+
 ## Suggestions and quick actions
 
 The chat always shows **three suggestions**, each a tap that runs something now and reads back what
@@ -150,6 +172,7 @@ off means, and its own switch for administrators.
 | Suggested routines | Medium: a short run every hour, a long one a week | off |
 | Weekly reply style | Medium, once a week per person | on |
 | Suggestions and quick actions in chat | Free | on |
+| Learn device settings | Free | on |
 
 These are apart from the two off switches (cloud access, and AI in this house), which cut everything at
 once. A feature that is off stops one use of Console's cloud agent and nothing else. Erasing Console's

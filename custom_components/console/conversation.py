@@ -42,6 +42,7 @@ from .const import (
     MODEL_PRO,
     PATH_ASSIST,
     PATH_AUTOMATIONS,
+    PATH_CHAT,
     PATH_SUGGESTIONS,
     PATH_VOICE,
     ROUTE_FALLBACK,
@@ -142,6 +143,7 @@ class Turn:
     calls: list[tuple[str, dict]] = field(default_factory=list)
     label: str | None = None
     model_calls: int = 0
+    touched: set[str] = field(default_factory=set)  # speakers and lights its tools changed (prefs.py)
 
 
 async def async_setup_entry(
@@ -324,6 +326,8 @@ class ConsoleAgent(conversation.ConversationEntity):
             chat_log.content[0] = conversation.SystemContent(content=system.content + devices_block(self.hass))
         if scope := self.data.scope.pop(chat_log.conversation_id, None):  # the chat card: one conversation, or all of them
             chat_log.content[0] = conversation.SystemContent(content=chat_log.content[0].content + scope)
+        if prefs := self.data.prefs.prompt():  # the levels this household wants its speakers and lights at
+            chat_log.content[0] = conversation.SystemContent(content=chat_log.content[0].content + prefs)
 
         route, effort = router.first_route(user_input.text)
         # A suggestions run is Flash with thinking off, and never the stronger model (owner, 2026-11-28: "made
@@ -394,6 +398,8 @@ class ConsoleAgent(conversation.ConversationEntity):
         category = turn.label or router.category_for_tools(turn.calls)
         topic = topics.for_turn(self._with_kinds(turn.calls), category)
         self.data.count_turn(turn.route, category, True, topic=topic)
+        # Learn from it: a person who asked about a device's level (prefs.py). Never the house's own runs.
+        self.data.prefs.after_turn(user_input.text, turn.touched, by_person=PATH.get() in (PATH_CHAT, PATH_VOICE, PATH_ASSIST))
         trail.meta(route=turn.route, cost_usd=turn.cost_usd, model_calls=turn.model_calls)
         _LOGGER.debug(
             "Console turn: route=%s category=%s model_calls=%s cost=%.5f ms=%d",
@@ -466,6 +472,23 @@ class ConsoleAgent(conversation.ConversationEntity):
         )
         trail.meta(route=ROUTE_LOCAL, cost_usd=0.0, model_calls=0)
         return conversation.ConversationResult(response=response, conversation_id=chat_log.conversation_id)
+
+    def _touched(self, calls: list[llm.ToolInput], results: list[conversation.ToolResultContent]) -> set[str]:
+        """The speakers and lights a round of tool calls changed: named in what was asked or what came back,
+        and the speaker a music call was about."""
+        from . import music, prefs  # noqa: PLC0415
+
+        found: set[str] = set()
+        for call, result in zip(calls, results, strict=False):
+            found |= prefs.entities_in(call.tool_args) | prefs.entities_in(result.result.data)
+            if _bare(call.tool_name) == "music" and (call.tool_args or {}).get("op") in ("play", "control", "move"):
+                for room in ((call.tool_args or {}).get("room"), (call.tool_args or {}).get("to")):
+                    if room:
+                        try:
+                            found.add(music._player(self.hass, str(room))["id"])  # noqa: SLF001
+                        except music.Refused:
+                            pass
+        return found
 
     def _with_kinds(self, calls: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
         """The same calls, with the kind of thing ("light") filled in where an intent tool was given only
@@ -576,6 +599,9 @@ class ConsoleAgent(conversation.ConversationEntity):
             ]
             for key, result in zip(keys, results, strict=False):
                 trail.end(key, result.result.data, bool(result.result.error))
+            touched = self._touched(calls, results)
+            self.data.prefs.agent_touched(touched)
+            turn.touched |= touched
             if turn.route == ROUTE_FAST and (reply := confirmed_reply(calls, results)):
                 turn.label = "control"
                 rows = [row for result in results for row in result.result.data["results"]]

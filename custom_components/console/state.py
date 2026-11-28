@@ -78,6 +78,7 @@ def _fresh() -> dict[str, Any]:
         "suggestions": {"on": False, "items": [], "home": {}, "rest": {}, "never": [], "kept": [], "last_run": None, "counts": {}},
         "style": {"on": True, "last_run": None},  # style.py
         "features": {},  # features.py: the AI features switched away from their defaults
+        "prefs": {"devices": {}},  # prefs.py: the levels this household wants each speaker and light at
     }
 
 

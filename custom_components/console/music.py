@@ -17,6 +17,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
+from .const import DOMAIN
+
 MA = "music_assistant"
 KINDS = ("track", "album", "artist", "playlist", "radio", "podcast", "audiobook")
 WAIT_S = 8.0
@@ -287,8 +289,14 @@ async def run(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
         if not what:
             raise Refused("Say what to play in what: a name, or a uri from search or library.")
         player = _player(hass, str(args.get("room") or ""))
-        if args.get("volume") is not None:
-            level = max(0, min(100, int(args["volume"]))) / 100
+        volume = args.get("volume")
+        learned = None
+        if volume is None:  # no level asked for: the one this household wants this speaker at, if it has one (prefs.py)
+            prefs = getattr(hass.data.get(DOMAIN), "prefs", None)
+            learned = prefs.level(player["id"], "volume") if prefs is not None else None
+            volume = learned
+        if volume is not None:
+            level = max(0, min(100, int(volume))) / 100
             await hass.services.async_call("media_player", "volume_set", {"entity_id": player["id"], "volume_level": level}, blocking=True)
         data = {"media_id": what}
         for ours, theirs in (("artist", "artist"), ("album", "album")):
@@ -320,6 +328,8 @@ async def run(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
             if via_twin is not None:
                 return via_twin
         now["result"] = "CHECKED" if now["state"] == "playing" else "NOT CONFIRMED"
+        if learned is not None:
+            now["volume_from"] = f"the {learned}% this household wants this speaker at (learned)"
         return now
 
     if op == "move":

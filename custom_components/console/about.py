@@ -47,6 +47,11 @@ async def facts(hass: HomeAssistant) -> dict[str, Any]:
             "now": {wording.FEATURES[row.key]["name"]: "on" if data.feature(row.key) else "off" for row in features.FEATURES},
             "where": "Console settings > AI features; only an administrator can switch one, and this chat can't",
         },
+        "device_settings": (
+            "Console learns the volume this household wants each speaker at and the brightness it wants each light at, "
+            "from what people ask it for and change by hand, and uses them when nobody names a level. Listed and "
+            "forgettable in Console settings > What the house knows about you; switched off under AI features."
+        ),
         "chat_suggestions": (
             "The chat always shows three suggestions to tap, made on this box with no AI from what's on and how the "
             "house is used; a tap runs one at home. Tapped 3 times on 2 different days, one becomes a quick action "

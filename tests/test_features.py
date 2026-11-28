@@ -21,9 +21,9 @@ async def test_the_page_lists_each_feature_with_its_cost_and_what_it_used(hass, 
     await ask(hass, "which lights did we leave on downstairs and should I worry")
     got = (await ws(hass, hass_ws_client, {"type": "console/features"}))["result"]
     rows = {row["key"]: row for row in got["features"]}
-    assert list(rows) == ["agent", "pro", "suggestions", "style", "chips"]
-    assert [rows[k]["on"] for k in rows] == [True, True, False, True, True]  # the weekly run is the one that's off until asked for
-    assert [rows[k]["level_name"] for k in rows] == ["Low", "High", "Medium", "Medium", "Free"]
+    assert list(rows) == ["agent", "pro", "suggestions", "style", "chips", "prefs"]
+    assert [rows[k]["on"] for k in rows] == [True, True, False, True, True, True]  # the weekly run is the one that's off until asked for
+    assert [rows[k]["level_name"] for k in rows] == ["Low", "High", "Medium", "Medium", "Free", "Free"]
     for row in rows.values():  # every feature says what it is, what it tends to cost and what off means
         assert row["name"] and row["what"] and row["cost"] and row["off"].startswith("Off:")
     assert "credit" in rows["agent"]["cost"] and rows["chips"]["cost"].startswith("Free.")
@@ -88,10 +88,10 @@ async def test_with_suggestions_in_chat_off_the_card_gets_none(hass, console, ha
 
 
 async def test_erasing_data_never_turns_a_feature_back_on(hass, console):
-    for key in (features.AGENT, features.PRO, features.STYLE, features.CHIPS):
+    for key in (features.AGENT, features.PRO, features.STYLE, features.CHIPS, features.PREFS):
         features.set_on(console, key, False)
     await console.async_erase()
-    assert [console.feature(k) for k in ("agent", "pro", "suggestions", "style", "chips")] == [False, False, False, False, False]
+    assert [console.feature(k) for k in ("agent", "pro", "suggestions", "style", "chips", "prefs")] == [False] * 6
 
 
 async def test_the_page_is_called_console_settings_and_has_an_ai_features_tab(hass, console, hass_client):

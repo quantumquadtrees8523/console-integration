@@ -28,13 +28,14 @@ class Feature:
     paths: tuple[str, ...] = ()  # where its requests are counted (the Plan tab's "Where it went")
 
 
-AGENT, PRO, WEEKLY, STYLE, CHIPS = "agent", "pro", "suggestions", "style", "chips"
+AGENT, PRO, WEEKLY, STYLE, CHIPS, PREFS = "agent", "pro", "suggestions", "style", "chips", "prefs"
 FEATURES = (
     Feature(AGENT, True, "low", (PATH_CHAT, PATH_VOICE, PATH_ASSIST, PATH_AUTOMATIONS)),
     Feature(PRO, True, "high"),
     Feature(WEEKLY, False, "medium", (PATH_SUGGESTIONS,)),
     Feature(STYLE, True, "medium", (PATH_STYLE,)),
     Feature(CHIPS, True, "none", (PATH_TAPS,)),
+    Feature(PREFS, True, "none"),
 )
 BY_KEY = {feature.key: feature for feature in FEATURES}
 # Requests that are a feature of their own: the cloud-agent switch doesn't stop them, their own does.

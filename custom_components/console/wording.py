@@ -250,6 +250,26 @@ def suggestion_dismissed(name: str) -> str:
     return f"Removed “{name}”. I won't suggest it again."
 
 
+# --- device settings (prefs.py) -----------------------------------------------------------------------
+
+PREFS_HEADER = (
+    "\n\nSettings this household chose for its devices, learned from what they asked you for and what they "
+    "changed by hand. When someone asks for one of these devices without naming a level (\"play some jazz in "
+    "the kitchen\", \"turn on the desk lamp\"), use this level. What they ask for now always wins.\n"
+)
+SETTING_WORDS = {"volume": "volume", "brightness": "brightness"}
+HOW_WORDS = {"asked": "asked for", "by hand": "set by hand", "corrected": "corrected after Console set it"}
+
+
+def pref_line(row: dict[str, Any]) -> str:
+    times = f"{row['times']} time{'s' if row['times'] != 1 else ''}"
+    return f"- {row['name']} ({row['entity_id']}): {SETTING_WORDS[row['setting']]} {row['level']}% (from {times}; last {HOW_WORDS.get(row['last_how'], row['last_how'])})"
+
+
+def pref_forgotten(name: str, setting: str) -> str:
+    return f"Forgotten. Console no longer assumes a {SETTING_WORDS.get(setting, setting)} for {name}."
+
+
 # --- what a chat turn may draw on (websocket_api.py): the model reads these, a household never does -----
 
 def scope_reply(title: str) -> str:
@@ -356,6 +376,16 @@ FEATURES = {
             "own messages."
         ),
         "off": "Off: the note it already has is still followed. It just isn't updated.",
+    },
+    "prefs": {
+        "name": "Learn device settings",
+        "what": (
+            "Remembers the volume you want each speaker at and the brightness you want each light at: from what you "
+            "ask Console for (\u201ctoo loud, turn it down\u201d) and what you change by hand. Console uses them "
+            "whenever you don't name a level, and starts music at that speaker's volume."
+        ),
+        "cost": "Free. It's worked out on this box from what you do, with no AI.",
+        "off": "Off: nothing more is learned, and Console stops using what it learned. What it learned is kept until you forget it.",
     },
     "chips": {
         "name": "Suggestions and quick actions in chat",

@@ -22,6 +22,7 @@ from .alerts import UsageAlerts
 from .guard import AiGuard
 from .history import ChatHistory
 from .learned import Learned
+from .prefs import Prefs
 from .others import OtherAgents
 from .state import ConsoleData
 from .style import Style
@@ -39,6 +40,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = ConsoleData(hass)
     await data.async_load()
     data.learned = Learned(hass, data)
+    data.prefs = Prefs(hass, data)
     data.others = OtherAgents(hass, data)
     data.support = Support(hass, data)
     data.guard = AiGuard(hass, data)
@@ -97,6 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(llm.async_register_api(hass, tools.ConsoleAPI(hass)))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     data.learned.start()
+    data.prefs.start()
     data.others.start()
     data.support.start()
     data.guard.start()
@@ -135,6 +138,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         data = hass.data[DOMAIN]
         data.learned.stop()
+        data.prefs.stop()
         data.others.stop()
         data.support.stop()
         data.guard.stop()

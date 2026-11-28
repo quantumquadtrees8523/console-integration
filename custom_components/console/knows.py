@@ -73,6 +73,8 @@ async def everything(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "usage": data.summary(),
         "topics": data.topics_waiting(),
         "chat_messages": data.history.total(),
+        "prefs": data.prefs.listing(),
+        "prefs_on": data.feature("prefs"),
     }
 
 

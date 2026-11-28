@@ -33,6 +33,10 @@ a skill's method or a tool in Sunrise, when and on which model it runs here.
 - The chat always offers three suggestions (`suggestions.py`), made at home with no AI unless the weekly
   run added routines. Three taps on two days makes one a quick action; four sightings on two days with no
   tap discards it. Only lights, switches, fans, helpers and scenes exposed to Assist.
+- Every chat, voice and Assist turn, and every change by hand, feeds the device-settings learner
+  (`prefs.py`; owner, 2026-11-28): a speaker's volume and a light's brightness a person asked for or left a
+  device at. Only levels a person chose count: never one the agent picked unasked, never an automation's.
+  The agent is told them every turn and the music tool plays at them. Levels and times only, no words.
 - Each use of the cloud agent is an AI feature with its own switch and its cost in words (`features.py`,
   the AI features tab). A new one gets a row there. `cloud_state()` is what the relay is told: a feature
   switch never changes it.

@@ -194,7 +194,11 @@ class ConsolePanel extends HTMLElement {
       : `<p class="soft">Sunrise isn't installed, so there are no notes.</p>`;
     const presence = k.presence.length ? `<table>${k.presence.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.state === "home" ? "Home" : p.state === "not_home" ? "Away" : p.state)} · since ${dayTime(p.since)}</td></tr>`).join("")}</table>` : `<p class="soft">Home Assistant isn't tracking anyone's presence.</p>`;
     const learned = k.learned.length ? `<table>${k.learned.map((l) => `<tr><td>“${esc(l.sentence)}”<div class="soft">${esc(l.names || "")} · learned ${day(l.learned_at)} · used ${l.uses || 0} times</div></td><td>${admin ? `<button class="act" data-do="forget" data-id="${esc(l.id)}">Forget</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="soft">None yet. When you ask for the same thing the same way three times, Console teaches it to Home Assistant so it runs at home.</p>`;
+    const HOW = { asked: "you asked for it", "by hand": "set by hand", corrected: "corrected after Console set it" };
+    const prefs = (k.prefs || []).length ? `<table>${k.prefs.map((p) => `<tr><td>${esc(p.name)}: ${esc(p.setting)} ${p.level}%<div class="soft">from ${p.times} time${p.times === 1 ? "" : "s"} · last ${esc(HOW[p.last_how] || p.last_how)}, ${dayTime(p.last_at)}</div></td><td>${admin ? `<button class="act" data-do="pref-forget" data-entity="${esc(p.entity_id)}" data-setting="${esc(p.setting)}">Forget</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="soft">None yet. When you ask Console to turn a speaker down, or change a light's brightness by hand, Console remembers the level you chose.</p>`;
     return `
+      <section><h2>Device settings Console learned</h2>
+        <p class="soft">The volume you want each speaker at and the brightness you want each light at, learned from what you ask Console for and what you change by hand. Console uses them whenever you don't name a level, and starts music at that speaker's volume. What you ask for at the time always wins. ${k.prefs_on ? "" : "<b>Off</b>: turn on Learn device settings under AI features to use and add to them."}</p>${prefs}</section>
       <section><h2>Notes the agents keep</h2>
         <p class="soft">Sunrise's memory: what Console's agent and Claude have written down about this house and what you prefer. Kept on this box only. Open a note to read, change or delete it.</p>${memory}</section>
       <section><h2>Who's home</h2>
@@ -350,6 +354,7 @@ class ConsolePanel extends HTMLElement {
       else if (what === "mem-close") { this._editing = null; }
       else if (what === "mem-save") { await this._ws({ type: "console/memory/write", name: this._editing.name, text: this.shadowRoot.getElementById("memtext").value }); this._editing = null; this._said = "Saved."; }
       else if (what === "mem-delete") { if (!confirm(`Delete the note “${this._editing.name}”? It can be brought back from Sunrise's history.`)) return; await this._ws({ type: "console/memory/delete", name: this._editing.name }); this._editing = null; this._said = "Deleted."; }
+      else if (what === "pref-forget") { const r = await this._ws({ type: "console/prefs/forget", entity_id: at.entity, setting: at.setting }); this._said = r.message; }
       else if (what === "forget") { await this._ws({ type: "console/learned/forget", sentence_id: at.id }); this._said = "Forgotten. That sentence goes to the cloud agent again."; }
       else if (what === "chat-clear") { if (!confirm("Delete your chat history from this box? It can't be brought back.")) return; const r = await this._ws({ type: "console/chat/clear" }); this._said = `Deleted ${r.deleted} messages.`; }
       else if (what === "assist-clear") { const r = await this._ws({ type: "console/assist/clear" }); this._said = `Cleared ${r.cleared}.`; }
