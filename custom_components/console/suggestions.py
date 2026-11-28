@@ -3,7 +3,7 @@ something in the house now, and the ones a household keeps using stay under the 
 
 Where a suggestion comes from, best first:
 
-1. A routine the cloud agent suggested (the weekly run below): a real Home Assistant automation that
+1. A routine the cloud agent suggested (the runs below): a real Home Assistant automation that
    Sunrise saved switched off and labelled "Suggested" (Sunrise's `routine` op=suggest).
 2. What this house usually does at about this hour, from Sunrise's `usage` ("Turn on the Den lamp").
 3. What is on right now ("Turn off the Kitchen lights").
@@ -25,11 +25,22 @@ What happens to one:
 - A routine nobody taps for EXPIRE_DAYS days is removed, and an administrator can remove any of them (✕):
   never suggested again.
 - A quick action nobody uses for QUICK_IDLE_DAYS days goes back to being an ordinary suggestion.
-- An administrator can let a suggested routine run by itself (op=keep): from then on it is an ordinary
-  routine on its own trigger, and Sunrise's `undo` still takes it back.
+- A suggested routine is off until it has been tapped AUTO_TAPS times (owner, 2026-11-28: "it should not be
+  automatic until the user clicks on it twice but they do not need to actively click on in order for it to
+  turn on"): the second tap itself lets it run by itself (Sunrise's op=keep), with nothing more to press.
+  From then on it is an ordinary routine on its own trigger, Sunrise's `undo` still takes it back, and it
+  stays in the list here: taps keep counting, and it becomes a quick action like anything else.
 
-The weekly run (Mondays at 3 AM) is an AI feature, off unless an administrator turns it on, because each
-run spends some of the month's credits; what it spent shows on the Plan tab under "Where it went".
+The runs are an AI feature, off unless an administrator turns it on, because each run spends some of the
+month's credits; what they spent shows on the Plan tab under "Where it went". The house uses Console, and
+Console is guided by Sunrise: each run is one ordinary turn of Console's agent following Sunrise's `routines`
+skill, on Flash with thinking off and never the stronger model (conversation.py).
+
+- Every hour (LISTEN_MINUTE past) the agent is asked what the house heard and follows the skill's "Listening":
+  Sunrise's `usage` lists what followed what (a door, motion sensor or person changed, and someone switched a
+  thing by hand right after, often enough), and the agent saves those as suggestions, or changes nothing.
+- Every Monday at 3 AM it follows "Suggesting routines" in full, for habits by the clock too.
+- The house can ask for either itself with the `console.suggest_routines` service.
 Console keeps, per suggestion: what it is, when it was seen and tapped, and how often. Nothing a person
 said. Only counts leave the box.
 """
@@ -65,6 +76,8 @@ QUICK_IDLE_DAYS = 30
 MAX_LIVE = 3  # suggested routines waiting at a time
 EXPIRE_DAYS = 7
 RUN_AT = (0, 3, 0)  # Monday (weekday 0), 3:00 local time, when the house is quiet
+LISTEN_MINUTE = 17  # every hour at this minute: what did the house hear?
+AUTO_TAPS = 2  # tapped this often, a suggested routine runs by itself
 NEVER_KEPT = 200
 DAYS_KEPT = 5
 USAGE_DAYS = 14
@@ -81,6 +94,13 @@ RUN_PROMPT = (
     "with routine op=suggest. Never act, try or keep anything now: nobody is here, and nothing in the house may change "
     "now. Don't suggest these again, the household didn't want them: {never}. Already suggested: {live}. If nothing "
     "has enough evidence, suggest nothing. Reply with one line: how many you suggested."
+)
+
+
+LISTEN_PROMPT = (
+    "What did the house hear? Follow the routines skill (get_skill name=routines), its part “Listening”, exactly. "
+    "Save up to {n} as suggestions (switched off). Never act, try or keep anything now. Don't suggest these again, "
+    "the household didn't want them: {never}. Already suggested: {live}. Reply with one line: how many you saved."
 )
 
 
@@ -168,13 +188,22 @@ class Suggestions:
 
     @callback
     def start(self) -> None:
-        self._stop = async_track_time_change(self.hass, self._weekly, hour=RUN_AT[1], minute=RUN_AT[2], second=0)
+        self._stop = [
+            async_track_time_change(self.hass, self._weekly, hour=RUN_AT[1], minute=RUN_AT[2], second=0),
+            async_track_time_change(self.hass, self._hourly, minute=LISTEN_MINUTE, second=0),
+        ]
 
     @callback
     def stop(self) -> None:
-        if self._stop:
-            self._stop()
-            self._stop = None
+        for stop in self._stop or []:
+            stop()
+        self._stop = None
+
+    async def _hourly(self, now: datetime) -> None:
+        try:
+            await self.run(heard=True)
+        except Exception:  # noqa: BLE001 (a failed hour mustn't stop the next one)
+            _LOGGER.exception("Console: the hourly listen failed")
 
     async def _weekly(self, now: datetime) -> None:
         if now.weekday() != RUN_AT[0]:
@@ -359,7 +388,7 @@ class Suggestions:
 
     def _routine_chip(self, item: dict[str, Any]) -> dict[str, Any]:
         return {"id": item["id"], "kind": "routine", "name": item["name"], "why": item.get("description") or "",
-                "taps": int(item.get("taps") or 0), "quick": bool(item.get("quick"))}
+                "taps": int(item.get("taps") or 0), "quick": bool(item.get("quick")), "auto": bool(item.get("auto"))}
 
     async def listing(self, *, admin: bool = True, routines: bool = True) -> dict[str, Any]:
         """What the chat shows (`suggested`, always SHOWN of them, and `quick`), and what the settings page
@@ -394,14 +423,15 @@ class Suggestions:
             "suggested": [c["chip"] for c in pick(offered)],
             "quick": [chip for _, chip in sorted(quick, key=lambda q: q[0], reverse=True)][:QUICK_MAX],
             "items": [
-                {k: item.get(k) for k in ("id", "name", "description", "taps", "made", "last_tap", "seen")} | {"quick": bool(item.get("quick"))}
+                {k: item.get(k) for k in ("id", "name", "description", "taps", "made", "last_tap", "seen")} | {"quick": bool(item.get("quick")), "auto": bool(item.get("auto"))}
                 for item in state["items"]
             ],
             "kept": list(state["kept"])[-20:],
             "last_run": state["last_run"],
             "available": available,
             "rules": {"shown": SHOWN, "promote_taps": PROMOTE_TAPS, "promote_days": PROMOTE_DAYS, "discard_seen": DISCARD_SEEN,
-                      "rest_days": REST_DAYS, "quick_max": QUICK_MAX, "quick_idle_days": QUICK_IDLE_DAYS, "expire_days": EXPIRE_DAYS},
+                      "rest_days": REST_DAYS, "quick_max": QUICK_MAX, "quick_idle_days": QUICK_IDLE_DAYS, "expire_days": EXPIRE_DAYS,
+                      "auto_taps": AUTO_TAPS},
         }
 
     def _count(self, what: str) -> None:
@@ -429,10 +459,12 @@ class Suggestions:
         if changed:
             self.data.changed()
 
-    # --- the weekly run --------------------------------------------------------------------------
+    # --- the runs --------------------------------------------------------------------------------
 
-    async def run(self, *, force: bool = False) -> dict[str, Any]:
-        """Tidy up, then ask the cloud agent for new suggested routines up to MAX_LIVE."""
+    async def run(self, *, force: bool = False, heard: bool = False) -> dict[str, Any]:
+        """Tidy up, then one turn of the cloud agent, guided by Sunrise's routines skill, for new suggested
+        routines up to MAX_LIVE: what the house heard (`heard`, the hourly run) or how the house is used as a
+        whole (Monday's)."""
         state = self.state
         if not state["on"] and not force:
             return {"ran": False, "why": "off"}
@@ -445,13 +477,13 @@ class Suggestions:
         try:
             await self.reconcile()
             await self.expire()
-            room = MAX_LIVE - sum(1 for i in state["items"] if not i.get("quick"))
+            room = MAX_LIVE - sum(1 for i in state["items"] if not i.get("quick") and not i.get("auto"))
             if room <= 0:
                 return self._ran(False, "full")
             from homeassistant.components import conversation  # noqa: PLC0415
 
             before = self.data.spend_usd
-            text = RUN_PROMPT.format(
+            text = (LISTEN_PROMPT if heard else RUN_PROMPT).format(
                 n=room,
                 never=", ".join(f"“{n['name']}”" for n in state["never"][-30:]) or "none",
                 live=", ".join(f"“{i['name']}”" for i in state["items"]) or "none",
@@ -478,7 +510,8 @@ class Suggestions:
         state = self.state
         listed = await self._routine({"op": "list"})
         live = {r["id"]: r for r in listed.get("routines") or [] if r.get("suggestion")}
-        state["items"] = [item for item in state["items"] if item["id"] in live]
+        there = {r["id"] for r in listed.get("routines") or []}  # one that runs by itself is an ordinary routine now
+        state["items"] = [item for item in state["items"] if item["id"] in live or (item.get("auto") and item["id"] in there)]
         known = {item["id"] for item in state["items"]}
         never = {n["fingerprint"] for n in state["never"]}
         new = 0
@@ -488,7 +521,7 @@ class Suggestions:
             got = await self._routine({"op": "get", "id": rid})
             config = got.get("config") or {}
             mark = fingerprint(config)
-            waiting = sum(1 for i in state["items"] if not i.get("quick"))
+            waiting = sum(1 for i in state["items"] if not i.get("quick") and not i.get("auto"))
             if mark in never or any(i["fingerprint"] == mark for i in state["items"]) or waiting >= MAX_LIVE:
                 await self._routine({"op": "dismiss", "id": rid})
                 continue
@@ -511,16 +544,18 @@ class Suggestions:
 
     async def expire(self) -> int:
         """Remove the suggested routines nobody has tapped for EXPIRE_DAYS days. A quick action isn't one
-        of them: it goes back to a suggestion first, after QUICK_IDLE_DAYS."""
+        of them: it goes back to a suggestion first, after QUICK_IDLE_DAYS. Nor is one that runs by itself:
+        the household accepted it."""
         cutoff = self.data.now() - timedelta(days=EXPIRE_DAYS)
-        old = [i for i in self.state["items"] if not i.get("quick") and datetime.fromisoformat(i.get("last_tap") or i["made"]) < cutoff]
+        old = [i for i in self.state["items"] if not i.get("quick") and not i.get("auto") and datetime.fromisoformat(i.get("last_tap") or i["made"]) < cutoff]
         for item in old:
             await self._drop(item, None, "expired")
         return len(old)
 
     async def _drop(self, item: dict[str, Any], user_id: str | None, why: str) -> None:
         try:
-            await self._routine({"op": "dismiss", "id": item["id"]}, user_id)
+            # One that runs by itself is an ordinary routine: it is deleted (undoable), not dismissed.
+            await self._routine({"op": "delete" if item.get("auto") else "dismiss", "id": item["id"]}, user_id)
         except Refused:
             pass  # Sunrise isn't there to remove it: forget it here all the same
         state = self.state
@@ -630,6 +665,8 @@ class Suggestions:
             row["name"] = name
         was_quick = bool(row.get("quick"))
         tapped(row, now, day)
+        # The second tap is the yes: from here on it runs by itself. Nothing else to press.
+        turned_on = item is not None and not item.get("auto") and int(row["taps"]) >= AUTO_TAPS and await self._auto(item, user_id)
         self._count("tapped")
         if kind != "ask":
             self.data.count_path(PATH_TAPS)
@@ -640,26 +677,32 @@ class Suggestions:
             "id": sid,
             "kind": kind,
             "name": name,
-            "reply": f"{done} {note}".strip(),
+            "reply": " ".join(part for part in (done, wording.suggestion_kept(name) if turned_on else "", note) if part),
+            "auto": bool(item and item.get("auto")),
             "taps": row["taps"],
             "quick": bool(row.get("quick")),
             "promoted": promoted,
             "things": things,
         } | ({"ask": recipe["ask"]} if kind == "ask" else {})
 
+    async def _auto(self, item: dict[str, Any], user_id: str) -> bool:
+        """Let a suggested routine run by itself from now on (Sunrise's op=keep). It stays in the list."""
+        kept = await self._routine({"op": "keep", "id": item["id"]}, user_id)
+        if not kept.get("ok"):
+            return False
+        item["auto"] = True
+        self.state["kept"].append({"name": item["name"], "entity_id": kept.get("entity_id"), "change_id": kept.get("change_id"),
+                                   "at": self.data.now().isoformat()})
+        self._count("kept")
+        return True
+
     async def keep(self, sid: str, user_id: str) -> dict[str, Any]:
-        """Let a suggested routine run by itself from now on (Sunrise's op=keep)."""
+        """An administrator lets a suggested routine run by itself without waiting for the taps."""
         item = self._item(sid)
         if item is None:
             raise Refused(wording.SUGGESTION_GONE)
-        kept = await self._routine({"op": "keep", "id": sid}, user_id)
-        if not kept.get("ok"):
-            raise Refused(str(kept.get("error") or kept.get("why") or wording.SUGGESTION_DIDNT_RUN))
-        state = self.state
-        state["items"] = [i for i in state["items"] if i["id"] != sid]
-        state["kept"].append({"name": item["name"], "entity_id": kept.get("entity_id"), "change_id": kept.get("change_id"),
-                              "at": self.data.now().isoformat()})
-        self._count("kept")
+        if not item.get("auto") and not await self._auto(item, user_id):
+            raise Refused(wording.SUGGESTION_DIDNT_RUN)
         self.data.changed()
         return {"ok": True, "reply": wording.suggestion_kept(item["name"])}
 
@@ -681,8 +724,9 @@ class Suggestions:
         return {"ok": True, "reply": wording.suggestion_dismissed(name)}
 
     async def dismiss_all(self) -> int:
-        """Remove every suggested routine (the data wipe): nothing switched off is left behind in automations."""
-        items = list(self.state["items"])
+        """Remove every suggested routine (the data wipe): nothing switched off is left behind in automations.
+        One that already runs by itself is the household's own routine now, and stays."""
+        items = [i for i in self.state["items"] if not i.get("auto")]
         for item in items:
             try:
                 await self._routine({"op": "dismiss", "id": item["id"]})

@@ -132,14 +132,17 @@ def handoff(args: dict[str, Any]) -> str:
 
 # --- suggestions and quick actions (suggestions.py) -------------------------------------------------
 
-SUGGESTIONS_ON_TITLE = "Weekly suggestions are on"
+SUGGESTIONS_ON_TITLE = "Suggested routines are on"
 SUGGESTIONS_ON = (
-    "Every Monday at 3 AM Console's cloud agent looks at how your house is used and suggests a few routines in "
-    "the chat. Each run uses some of this month's credits: see what it used in [Console settings](/console), "
+    "Console now listens to the house. Every hour its cloud agent checks what the house heard (a door opened, then "
+    "someone switched a light), and every Monday at 3 AM it looks at how your house is used, and suggests a few "
+    "routines in the chat. A suggestion stays off until it's been tapped twice; then it runs by itself. Every run "
+    "uses some of this month's credits, the hourly ones too: see what they used in [Console settings](/console), "
     "under Where it went. Turn it off any time under AI features."
 )
 SUGGESTIONS_COST = (
-    "Each Monday's run uses some of this month's credits. The Plan tab shows what it used, under Where it went."
+    "Every run uses some of this month's credits: a little each hour, more on Mondays. None runs while three "
+    "suggested routines are waiting. The Plan tab shows what they used, under Where it went."
 )
 SUGGESTIONS_NO_SUNRISE = "Suggested routines need Sunrise, and it isn't installed."
 SUGGESTION_GONE = "That suggestion isn't here any more."
@@ -291,12 +294,14 @@ FEATURES = {
         ),
     },
     "suggestions": {
-        "name": "Weekly suggested routines",
+        "name": "Suggested routines",
         "what": (
-            "Every Monday at 3 AM the cloud agent reads how the house was used and suggests up to 3 routines. Each "
-            "is a real automation, switched off, that shows as a suggestion in the chat."
+            "Console listens to the house. Every hour the cloud agent checks what the house heard (a door opened or "
+            "someone came home, and a light was switched by hand right after), and every Monday at 3 AM it reads "
+            "how the house was used. It suggests up to 3 routines: each is a real automation, switched off, that "
+            "shows as a suggestion in the chat. Tapped twice, it runs by itself from then on."
         ),
-        "cost": "Medium, once a week: one long request that takes several steps.",
+        "cost": "Medium: a short request every hour, and one long one a week. Flash only, with thinking off.",
         "off": (
             "Off: the chat still has its suggestions, made at home for free. Only the routines the cloud agent "
             "writes stop arriving."

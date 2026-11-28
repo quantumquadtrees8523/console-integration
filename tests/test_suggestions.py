@@ -56,8 +56,13 @@ class FakeRoutines:
             self.rows[rid].update(on=True, suggestion=False)
             return {"ok": True, "kept": rid, "entity_id": f"automation.{rid}", "change_id": "c1"}
         if op == "dismiss":
+            if not self.rows[rid]["suggestion"]:
+                return {"error": "it was kept, so it's an ordinary routine now: remove it with op=delete"}
             self.rows.pop(rid, None)
             return {"ok": True, "dismissed": rid}
+        if op == "delete":
+            self.rows.pop(rid, None)
+            return {"ok": True, "deleted": rid}
         return {"error": f"unknown op {op}"}
 
 
@@ -281,15 +286,53 @@ async def test_the_run_asks_the_cloud_agent_and_picks_up_what_sunrise_saved(hass
     model.say("Suggested 1. [[customization]]")
     done = await console.suggestions.run()
     assert done["ran"] and done["made"] == 1 and done["cost_usd"] > 0
-    assert model.calls[0]["effort"] == "low"  # Flash with a little thinking
     assert "op=suggest" in model.calls[0]["messages"][-1]["content"]
     got = await console.suggestions.listing()
     [item] = got["items"]
     assert item["name"] == CONFIG["alias"] and item["taps"] == 0 and item["quick"] is False
-    assert got["suggested"][0] == {"id": item["id"], "kind": "routine", "name": CONFIG["alias"], "why": CONFIG["description"], "taps": 0, "quick": False}
+    assert got["suggested"][0] == {"id": item["id"], "kind": "routine", "name": CONFIG["alias"], "why": CONFIG["description"], "taps": 0, "quick": False,
+                                   "auto": False}
     assert len(got["suggested"]) == 3  # the routine the cloud agent suggested comes first, the rest are made at home
     assert ("suggest", None) in fake.calls  # saved with nobody signed in: the nightly run
     assert console.suggestions.state["last_run"]["made"] == 1
+
+
+async def test_the_hourly_run_is_the_agent_following_sunrises_listening_and_what_it_saves_is_off(hass, console, model, monkeypatch):
+    """Owner, 2026-11-28: "the house uses console which is guided by sunrise to properly do the task". Console
+    hands the agent no routine and reads nothing itself: it asks, and the skill says how."""
+    fake = _sunrise(hass, monkeypatch)
+    link(console)
+    console.suggestions.set_on(True)
+    model.call_tool("sunrise__routine", {"op": "suggest", "config": CONFIG})
+    model.say("Saved 1. [[customization]]")
+    done = await console.suggestions.run(heard=True)
+    assert done["ran"] and done["made"] == 1
+    asked = model.calls[0]["messages"][-1]["content"]
+    assert "get_skill name=routines" in asked and "Listening" in asked and "switched off" in asked
+    assert "light.kitchen" not in asked and "on=true" not in asked  # how is the skill's; nothing is made live
+    [item] = console.suggestions.state["items"]
+    assert fake.rows[item["id"]]["on"] is False  # a suggestion: it doesn't run by itself yet
+
+    # The house can ask for a run itself; an hour with nothing heard changes nothing.
+    model.say("Saved 0: nothing new was heard. [[status]]")
+    await hass.services.async_call("console", "suggest_routines", {"heard": True}, blocking=True)
+    assert len(model.calls) == 3 and "Listening" in model.calls[-1]["messages"][-1]["content"] and len(fake.rows) == 1
+
+
+async def test_every_suggestions_run_is_flash_with_thinking_off_and_never_the_stronger_model(hass, console, model, monkeypatch):
+    """Owner, 2026-11-28: "made using the flash model never reasoning"."""
+    from custom_components.console import openrouter
+    from custom_components.console.const import MODEL_FLASH
+
+    _sunrise(hass, monkeypatch)
+    link(console)
+    console.suggestions.set_on(True)
+    model.say("Suggested 0. [[customization]]")
+    assert (await console.suggestions.run())["ran"]  # Monday's
+    model.fail(openrouter.ModelError("flash gave up"))  # the hourly one: Flash fails, and nothing is handed up
+    assert (await console.suggestions.run(heard=True))["made"] == 0
+    assert [(c["model"], c["effort"]) for c in model.calls] == [(MODEL_FLASH, "none")] * 2
+    assert not any(t["function"]["name"] == "console_escalate" for c in model.calls for t in c["tools"])
 
 
 async def test_the_run_isnt_throttled_and_is_skipped_only_when_the_cloud_agent_cant_be_used(hass, console, model, monkeypatch):
@@ -324,36 +367,64 @@ async def test_it_runs_on_mondays_at_three_only(hass, console, monkeypatch):
     await console.suggestions._weekly(datetime(2026, 11, 30, 3, 0))  # a Monday
     await console.suggestions._weekly(datetime(2026, 12, 1, 3, 0))  # a Tuesday
     assert len(ran) == 1 and S.RUN_AT == (0, 3, 0)
+    await console.suggestions._hourly(datetime(2026, 12, 1, 14, S.LISTEN_MINUTE))  # and it listens every hour
+    assert ran == [{}, {"heard": True}]
 
 
-async def test_a_suggested_routine_runs_on_a_tap_becomes_a_quick_action_and_is_kept_only_when_asked(hass, console, monkeypatch, freezer):
+async def test_the_second_tap_turns_a_suggested_routine_on_and_it_stays_to_become_a_quick_action(hass, console, monkeypatch, freezer):
+    """Owner, 2026-11-28: "it should not be automatic until the user clicks on it twice but they do not need to
+    actively click on in order for it to turn on. commands a user accepts should continually show up there and
+    eventually be made into a quick button below the chat panel"."""
     freezer.move_to("2026-11-02 20:00:00+00:00")
     fake = _sunrise(hass, monkeypatch)
     user = await _admin(hass)
     fake.handle({"op": "suggest", "config": CONFIG}, None)
     await console.suggestions.reconcile()
     sid = console.suggestions.state["items"][0]["id"]
-    for n in range(1, 3):
-        done = await console.suggestions.tap(sid, user)
-        assert done["taps"] == n and not done["quick"] and "Kitchen light is off" in done["reply"]
+
+    done = await console.suggestions.tap(sid, user)
+    assert done["taps"] == 1 and done["auto"] is False and "Kitchen light is off" in done["reply"]
+    assert fake.rows[sid]["on"] is False and ("keep", user) not in fake.calls  # one tap: it ran once, and is still off
+
+    done = await console.suggestions.tap(sid, user)  # the second tap is the yes: nothing else to press
+    assert done["auto"] is True and "runs by itself from now on" in done["reply"]
+    assert fake.rows[sid] == {**CONFIG, "on": True, "suggestion": False} and fake.calls.count(("keep", user)) == 1
+    assert console.suggestions.state["kept"][0]["change_id"] == "c1"
+
+    # It stays in the list: an ordinary routine to Sunrise now, still a suggestion here, and taps go on counting.
+    assert await console.suggestions.reconcile() == 0
+    got = await console.suggestions.listing()
+    assert got["suggested"][0]["id"] == sid and got["suggested"][0]["auto"] is True and got["rules"]["auto_taps"] == 2
     freezer.tick(timedelta(days=1))
     done = await console.suggestions.tap(sid, user)
-    assert done["promoted"] and done["kind"] == "routine"
-    assert fake.rows[sid]["on"] is False  # a quick action still only runs when tapped
-    freezer.tick(timedelta(days=S.EXPIRE_DAYS + 1))
-    assert await console.suggestions.expire() == 0  # a quick action isn't swept out with the untapped ones
+    assert done["promoted"] and done["kind"] == "routine" and fake.calls.count(("keep", user)) == 1  # turned on once
     got = await console.suggestions.listing()
     assert names(got, "quick") == [CONFIG["alias"]] and CONFIG["alias"] not in names(got)
-    for _ in range(5):
-        await console.suggestions.tap(sid, user)
-    assert fake.rows[sid]["on"] is False and ("keep", user) not in fake.calls  # no number of taps makes it run by itself
 
-    kept = await console.suggestions.keep(sid, user)  # an administrator says so
-    assert "runs by itself from now on" in kept["reply"]
-    assert fake.rows[sid]["on"] is True and console.suggestions.state["items"] == []
-    assert console.suggestions.state["kept"][0]["change_id"] == "c1"
+    # Accepted, so never swept out with the untapped ones, and it no longer holds one of the waiting places.
+    freezer.tick(timedelta(days=S.EXPIRE_DAYS + 1))
+    assert await console.suggestions.expire() == 0 and sid in fake.rows
     counts = console.suggestions.state["counts"][console.period]
-    assert counts["tapped"] == 8 and counts["quick"] == 1 and counts["kept"] == 1
+    assert counts["tapped"] == 3 and counts["quick"] == 1 and counts["kept"] == 1
+
+    # An administrator's ✕ on one that runs by itself deletes the routine, and it's never suggested again.
+    assert "won't suggest it again" in (await console.suggestions.dismiss(sid, user))["reply"]
+    assert sid not in fake.rows and ("delete", user) in fake.calls and console.suggestions.state["items"] == []
+
+
+async def test_an_administrator_can_turn_one_on_without_waiting_for_the_taps(hass, console, monkeypatch):
+    fake = _sunrise(hass, monkeypatch)
+    user = await _admin(hass)
+    fake.handle({"op": "suggest", "config": CONFIG}, None)
+    await console.suggestions.reconcile()
+    sid = console.suggestions.state["items"][0]["id"]
+    kept = await console.suggestions.keep(sid, user)
+    assert "runs by itself from now on" in kept["reply"] and fake.rows[sid]["on"] is True
+    assert console.suggestions.state["items"][0]["auto"] is True  # it stays, on its way to a quick action
+    from custom_components.console import wipe
+
+    await wipe.erase_data(hass, "erase my data")
+    assert sid in fake.rows  # the household's own routine now: the data wipe leaves it running
 
 
 async def test_a_removed_or_ignored_routine_is_never_suggested_again(hass, console, monkeypatch, freezer):

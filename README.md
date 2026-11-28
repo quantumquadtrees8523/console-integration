@@ -77,22 +77,36 @@ to Assist. Never a lock, alarm, garage door, heating or anything that makes soun
 - A quick action nobody uses for 30 days goes back to being an ordinary suggestion.
 - **Suggestions and quick actions in chat** under AI features turns the whole row off.
 
-### Weekly suggested routines
+### Suggested routines
 
-An administrator can turn on **Weekly suggested routines** in Console settings, under AI features. It's
-off unless someone turns it on, because each run uses some of the month's credits.
+An administrator can turn on **Suggested routines** in Console settings, under AI features. It's off
+unless someone turns it on, because each run uses some of the month's credits.
 
-- Every Monday at 3 AM (the house's time) Console's cloud agent follows Sunrise's `routines` skill to suggest
-  up to 3 routines from how the house is used. Sunrise saves each one as a real automation, **switched
-  off** and labelled **Suggested**, so it can't fire on its own. It never suggests anything with a lock,
-  alarm, garage door, heating or sound, or anything not exposed to Assist.
+The house uses Console, and Console is guided by Sunrise: each run is one ordinary turn of Console's cloud
+agent following Sunrise's `routines` skill, on `deepseek/deepseek-v4.1-flash` with thinking off, and never
+handed to the stronger model.
+
+- **Every hour** the agent is asked what the house heard and follows the skill's "Listening": Sunrise
+  lists what followed what (a door, window, motion or presence sensor changed, or someone came or went,
+  and a person switched a light, switch, fan or cover by hand within two minutes, on at least 4 different
+  days and 6 times in 10), and the agent saves those as suggestions, or changes nothing.
+- **Every Monday at 3 AM** (the house's time) it follows "Suggesting routines" in full, for habits by the
+  clock too. Up to 3 wait at a time.
+- The house can ask for a run itself with the `console.suggest_routines` service (an automation, a button).
+- Sunrise saves each one as a real automation, **switched off** and labelled **Suggested**, so it can't
+  fire on its own. It never suggests anything with a lock, alarm, garage door, heating or sound, or
+  anything not exposed to Assist.
 - They show first among the chat's suggestions, for administrators (trying one changes the house's
-  setup), and follow the same rules: a tap runs one once, using it makes it a quick action, ignoring it
-  removes it. One nobody taps for 7 days is removed too. A removed routine is never suggested again.
-- A routine only ever runs by itself when an administrator says so: **Let it run by itself** under AI
-  features. From then on it's an ordinary automation, which Sunrise's `undo` can still take back.
-- It isn't throttled: it runs whenever the cloud agent can be used. **Suggest now** runs it at once.
-- Needs Sunrise 0.3.0 or newer (its `routine` tool's `suggest`, `keep` and `dismiss`).
+  setup). A tap runs one once. **The second tap lets it run by itself** from then on, with nothing else to
+  press: it's an ordinary automation, which Sunrise's `undo` can still take back.
+- An accepted routine stays among the suggestions, and using it makes it a quick action under the chat,
+  like any other.
+- One nobody taps for 7 days is removed, and so is one that's seen and ignored. A removed routine is never
+  suggested again. An administrator can also let one run by itself at once, or remove any of them, under
+  AI features.
+- A run is skipped while 3 are waiting, or when the cloud agent can't be used. **Suggest now** runs
+  Monday's look at once.
+- Needs Sunrise 0.4.0 or newer (its `routines` skill's "Listening" and its `usage` tool's `follows`).
 
 ## AI features
 
@@ -104,7 +118,7 @@ off means, and its own switch for administrators.
 |---|---|---|
 | Cloud agent in chat, voice and Assist | Low per request, most of a month's credits in total | on |
 | Stronger model for hard requests | High per request, rare | on |
-| Weekly suggested routines | Medium, once a week | off |
+| Suggested routines | Medium: a short run every hour, a long one a week | off |
 | Weekly reply style | Medium, once a week per person | on |
 | Suggestions and quick actions in chat | Free | on |
 
@@ -115,7 +129,7 @@ data never turns one back on.
 ## Where the credits went
 
 The Plan tab in Console settings has **Where it went**: a pie of this month's credits by where the requests
-came from (the chat card, voice, Assist in the app, weekly suggestions, automations and scripts), with
+came from (the chat card, voice, Assist in the app, suggested routines, automations and scripts), with
 a legend that also lists what spends no credits (taps on suggestions and quick actions, Claude and other agents,
 requests while support mode was on). It's kept on the box and isn't part of the summary that is sent out.
 

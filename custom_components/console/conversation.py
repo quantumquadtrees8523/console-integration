@@ -42,9 +42,11 @@ from .const import (
     MODEL_PRO,
     PATH_ASSIST,
     PATH_AUTOMATIONS,
+    PATH_SUGGESTIONS,
     PATH_VOICE,
     ROUTE_FALLBACK,
     ROUTE_FAST,
+    ROUTE_FULL,
     ROUTE_LOCAL,
     ROUTE_PRO,
 )
@@ -322,16 +324,23 @@ class ConsoleAgent(conversation.ConversationEntity):
             chat_log.content[0] = conversation.SystemContent(content=system.content + devices_block(self.hass))
 
         route, effort = router.first_route(user_input.text)
+        # A suggestions run is Flash with thinking off, and never the stronger model (owner, 2026-11-28: "made
+        # using the flash model never reasoning"). It keeps the full tool rounds: the skill reads usage and saves.
+        unattended = PATH.get() == PATH_SUGGESTIONS
+        if unattended:
+            route, effort = ROUTE_FULL, EFFORT_FAST
         turn = Turn(route=route, text=user_input.text)
         trail.step(
             "Sent to the cloud agent",
-            "DeepSeek V4.1 Flash, thinking off: this reads as a plain command."
+            "DeepSeek V4.1 Flash, thinking off: suggested routines never use thinking or the stronger model."
+            if unattended
+            else "DeepSeek V4.1 Flash, thinking off: this reads as a plain command."
             if effort == EFFORT_FAST
             else "DeepSeek V4.1 Flash, with a little thinking: this isn't a plain command.",
         )
         keep = len(chat_log.content)
         began = time.time()
-        stronger = self.data.feature(features.PRO)
+        stronger = self.data.feature(features.PRO) and not unattended
         try:
             try:
                 await self._run(chat_log, inference, MODEL_FLASH, effort, turn, trail, escalate=stronger and route != ROUTE_FAST)

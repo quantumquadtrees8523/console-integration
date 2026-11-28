@@ -358,7 +358,9 @@ class ConsoleChatCard extends HTMLElement {
     const go = admin ? el("button", "go") : chip;
     go.type = "button";
     go.textContent = `${item.kind === "ask" ? "" : "▶ "}${item.name}`;
-    go.title = item.why || (quick ? "A quick action: you use this one often." : "");
+    // A suggested routine is off until its second tap; after that it runs by itself (suggestions.py, AUTO_TAPS).
+    const routine = item.kind !== "routine" ? "" : item.auto ? "Runs by itself now." : item.taps ? "Tap once more and it runs by itself." : "A routine Console suggests. Tap to run it once; the second tap lets it run by itself.";
+    go.title = [item.why, routine || (quick ? "A quick action: you use this one often." : "")].filter(Boolean).join(" ");
     go.addEventListener("click", () => this._tap(item));
     if (admin) {
       const x = el("button", "x", "✕"); x.type = "button"; x.title = "Don't suggest this again"; x.setAttribute("aria-label", `Don't suggest ${item.name} again`);
