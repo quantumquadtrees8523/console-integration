@@ -52,7 +52,7 @@ const STYLE = `
   @media (max-width: 600px) { .facts td { display: block; width: auto !important; padding: 6px 0 0; } .facts td:last-child { border-top: 0; padding: 2px 0 8px; } }
 `;
 
-const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Weekly suggestions", style: "Weekly reply style", automations: "Automations and scripts",
+const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Suggested routines", style: "Weekly reply style", automations: "Automations and scripts",
   suggestion_taps: "Taps on suggestions and quick actions", claude: "Claude and other agents", support: "While support mode was on" };
 const PATH_NOTES = { suggestion_taps: "they run at home", claude: "on your own Claude plan", support: "Console's operator, or anyone's Claude while it was on" };
 const credits = (n) => `${n} credit${Number(n) === 1 ? "" : "s"}`;
@@ -301,16 +301,16 @@ class ConsolePanel extends HTMLElement {
       ${rows}`;
   }
 
-  // Under "Weekly suggested routines": the last run, the routines waiting or in use, and the ones kept.
+  // Under "Suggested routines": the last run, the routines waiting or in use, and the ones kept.
   _routines(admin) {
     const g = this._sugg;
     if (!g) return "";
     if (!g.available) return `<p class="soft">Suggested routines need Sunrise, and it isn't installed.</p>`;
     const last = g.last_run;
     const lastLine = last ? (last.ran ? `Last run ${dayTime(last.at)}: ${last.made} new, ${credits(Math.round((last.cost_usd || 0) * 1000) / 10)} used.` : `Last run ${dayTime(last.at)} was skipped (${esc(last.why)}).`) : "It hasn't run yet.";
-    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}${i.quick ? ` <span class="tag on">Quick action</span>` : ""}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} tap${i.taps === 1 ? "" : "s"}${admin ? ` <button class="act" data-do="sugg-keep" data-id="${esc(i.id)}" data-name="${esc(i.name)}">Let it run by itself</button> <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
+    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}${i.quick ? ` <span class="tag on">Quick action</span>` : ""}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} tap${i.taps === 1 ? "" : "s"}${i.auto ? ` <span class="tag on">Runs by itself</span>` : ""}${admin ? `${i.auto ? "" : ` <button class="act" data-do="sugg-keep" data-id="${esc(i.id)}" data-name="${esc(i.name)}">Let it run by itself now</button>`} <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
     const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">runs by itself since ${dayTime(k.at)}</td></tr>`).join("");
-    return `<p class="soft">${esc(lastLine)} A suggested routine is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it in the chat. One nobody taps for ${g.rules.expire_days} days is removed and never suggested again.</p>
+    return `<p class="soft">${esc(lastLine)} A suggested routine is a real automation, switched off and labelled “Suggested”: a tap in the chat runs it once, and the second tap lets it run by itself from then on. It stays in the chat and, used often enough, becomes a quick action. One nobody taps for ${g.rules.expire_days} days is removed and never suggested again.</p>
         ${items ? `<table>${items}</table>` : `<p class="soft">No suggested routines waiting.</p>`}
         ${kept ? `<h2 style="margin-top:16px">Running by themselves</h2><table>${kept}</table><p class="soft">These are ordinary automations now: change or remove one under Settings → Automations, or ask the chat to undo it.</p>` : ""}
         <p class="soft">${esc(this._suggSaid || "")}</p>`;
@@ -371,7 +371,7 @@ class ConsolePanel extends HTMLElement {
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
       else if (what === "feat") {
-        if (at.key === "suggestions" && at.on === "1" && !confirm("Turn weekly suggested routines on? Each Monday's run uses some of this month's credits. This page shows what it used.")) return;
+        if (at.key === "suggestions" && at.on === "1" && !confirm("Turn suggested routines on? The cloud agent will check what the house heard every hour, and look at the whole house on Mondays. Every run uses some of this month's credits. This page shows what they used.")) return;
         await this._ws({ type: "console/features/set", feature: at.key, on: at.on === "1" }); this._said = "";
       }
       else if (what === "sugg-keep") {

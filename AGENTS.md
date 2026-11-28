@@ -3,6 +3,11 @@
 Console's Home Assistant integration (domain `console`). It builds on Sunrise and never the other way
 round: everything that talks to the internet lives here; Sunrise makes no internet calls.
 
+Three open source projects make the home lab (owner, 2026-11-28). **Console** is the harness: everything
+about the agent (models, turns, schedules, what it spends). **Sunrise** is the skillset: the skills and the
+tools they use. **Makaan** is the operating system on top of Home Assistant. Put a change where it belongs:
+a skill's method or a tool in Sunrise, when and on which model it runs here.
+
 - One GitHub Issue, one branch, one PR. CI is the gate. A behavior is done only when a test proves it.
 - `custom_components/console/wording.py` holds every sentence a household reads. Change words there.
 - What a person says never leaves the box and is never in Console's store (`.storage/console`): a turn

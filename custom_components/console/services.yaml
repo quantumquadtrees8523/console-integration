@@ -8,3 +8,13 @@ rebuild_dashboard:
       default: true
       selector:
         boolean:
+suggest_routines:
+  name: Suggest routines
+  description: Ask Console's agent to look for routines now, guided by Sunrise's routines skill. Does nothing while suggested routines are turned off. Each run uses some of this month's credits.
+  fields:
+    heard:
+      name: Only what the house heard
+      description: On, the short run (a door opened, then someone switched a light). Off, the full look at how the house is used.
+      default: true
+      selector:
+        boolean:
