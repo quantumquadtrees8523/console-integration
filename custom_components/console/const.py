@@ -2,7 +2,7 @@
 
 DOMAIN = "console"
 NAME = "Console"
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 
 AGENT_NAME = "Console"
 
@@ -31,10 +31,10 @@ ROUTES = (ROUTE_LOCAL, ROUTE_FAST, ROUTE_FULL, ROUTE_PRO, ROUTE_FALLBACK, ROUTE_
 PATH_CHAT = "chat"  # the chat card
 PATH_VOICE = "voice"  # a voice speaker or satellite
 PATH_ASSIST = "assist"  # Assist in Home Assistant's own app or the Companion app, someone signed in
-PATH_SUGGESTIONS = "suggestions"  # the weekly suggested-routines run
+PATH_SUGGESTIONS = "suggestions"  # the suggested-routines runs (the hourly listen that found something, and Monday's)
 PATH_STYLE = "style"  # the weekly reply-style run (style.py)
 PATH_AUTOMATIONS = "automations"  # an automation or script asking the agent (conversation.process)
-PATH_TAPS = "suggestion_taps"  # a tap on a suggested routine: runs at home, no AI
+PATH_TAPS = "suggestion_taps"  # taps on suggested routines, from before 0.13 (they ran at home, no AI); kept for past months
 PATH_CLAUDE = "claude"  # Claude and other agents, through the MCP server
 PATH_SUPPORT = "support"  # other agents' requests while support mode was on
 PATHS = (PATH_CHAT, PATH_VOICE, PATH_ASSIST, PATH_SUGGESTIONS, PATH_STYLE, PATH_AUTOMATIONS, PATH_TAPS, PATH_CLAUDE, PATH_SUPPORT)

@@ -44,7 +44,7 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_suggestions,
         ws_suggestions_set,
         ws_suggestions_run,
-        ws_suggestion_tap,
+        ws_suggestion_keep,
         ws_suggestion_dismiss,
         ws_usage_paths,
     ):
@@ -301,7 +301,7 @@ def ws_chat_clear(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
 @websocket_api.websocket_command({vol.Required("type"): "console/suggestions"})
 @callback
 def ws_suggestions(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """The suggested routines waiting in the chat card, the setting, and the last night's run."""
+    """The suggested routines waiting for Keep or Undo in the chat card, the setting, and the last run."""
     data = hass.data[DOMAIN]
     answer = data.suggestions.listing()
     if data.cloud_state() in ("ai_off", "cloud_off") or not answer["available"]:
@@ -320,26 +320,22 @@ def ws_suggestions_set(hass: HomeAssistant, connection: websocket_api.ActiveConn
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_suggestions_run(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Run tonight's suggestions now (an administrator asked, so it runs even with the setting off)."""
+    """Run the weekly look at the house now (an administrator asked, so it runs even with the setting off)."""
     try:
         connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.run(force=True))
     except suggestions.Refused as error:
         connection.send_error(msg["id"], "refused", str(error))
 
 
-@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/tap", vol.Required("suggestion_id"): str})
+@websocket_api.websocket_command({vol.Required("type"): "console/suggestions/keep", vol.Required("suggestion_id"): str})
+@websocket_api.require_admin
 @websocket_api.async_response
-async def ws_suggestion_tap(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Run a suggestion once, as the person who tapped it. The fifth tap keeps it."""
-    data = hass.data[DOMAIN]
+async def ws_suggestion_keep(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Keep a suggestion: it's already running; from here on it's an ordinary routine."""
     try:
-        done = await data.suggestions.tap(msg["suggestion_id"], connection.user.id)
+        connection.send_result(msg["id"], await hass.data[DOMAIN].suggestions.keep(msg["suggestion_id"], connection.user.id))
     except suggestions.Refused as error:
         connection.send_error(msg["id"], "refused", str(error))
-        return
-    data.history.add(connection.user.id, "you", wording.suggestion_tapped(done["name"]))
-    data.history.add(connection.user.id, "console", done["reply"])
-    connection.send_result(msg["id"], done)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "console/suggestions/dismiss", vol.Required("suggestion_id"): str})

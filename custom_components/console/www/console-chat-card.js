@@ -58,11 +58,15 @@ const STYLE = `
   .step.think .d { font-style: italic; }
   .step .more { font: inherit; font-size: 11px; margin-left: 8px; padding: 0; border: 0; background: none; color: var(--primary-color); text-decoration: underline; cursor: pointer; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .suggested { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .suggested { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--divider-color); }
+  .suggested[hidden] { display: none; }
   .suggested .label { font-size: 12px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .06em; }
-  .sugg { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .sugg .why { font-size: 12px; color: var(--secondary-text-color); flex-basis: 100%; padding-left: 4px; }
-  .sugg .x { border: 0; background: none; color: var(--secondary-text-color); cursor: pointer; font-size: 14px; padding: 4px; }
+  .sugg { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .sugg .words { flex: 1; min-width: 180px; }
+  .sugg .name { font-weight: 600; }
+  .suggested .why { font-size: 12px; color: var(--secondary-text-color); }
+  .sugg .acts { display: flex; gap: 6px; }
+  .chip.keep { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
   .chip { border: 1px solid var(--divider-color); border-radius: 16px; padding: 6px 12px; font-size: 13px; background: none; color: var(--primary-text-color); cursor: pointer; font-family: inherit; }
   form { display: flex; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--divider-color); align-items: flex-end; }
   textarea { flex: 1; min-width: 0; min-height: 42px; max-height: 140px; padding: 10px 14px; border-radius: 21px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: 15px; line-height: 20px; resize: none; box-sizing: border-box; }
@@ -190,6 +194,7 @@ class ConsoleChatCard extends HTMLElement {
     } catch (e) { this._more = false; }
     this._drawTop();
     this._drawHello();
+    this._drawSuggested();
     this._log.scrollTop = this._log.scrollHeight;
   }
 
@@ -198,6 +203,7 @@ class ConsoleChatCard extends HTMLElement {
     root.innerHTML = `<style>${STYLE}</style>
       <ha-card>
         <div class="banner" hidden></div>
+        <div class="suggested" hidden></div>
         <div class="log" role="log" aria-live="polite"><div class="top"></div><div class="hello"></div></div>
         <form><textarea rows="1" placeholder="Ask Console" aria-label="Ask Console" enterkeyhint="send"></textarea>
         <button class="send" type="submit">Send</button></form>
@@ -206,6 +212,7 @@ class ConsoleChatCard extends HTMLElement {
     this._log = root.querySelector(".log");
     this._top = root.querySelector(".top");
     this._hello = root.querySelector(".hello");
+    this._sugg = root.querySelector(".suggested");
     const area = root.querySelector("textarea");
     const submit = () => { const text = area.value.trim(); if (text && !this._busy) { area.value = ""; area.style.height = ""; this._send(text); } };
     root.querySelector("form").addEventListener("submit", (event) => { event.preventDefault(); submit(); });
@@ -268,52 +275,56 @@ class ConsoleChatCard extends HTMLElement {
       chips.appendChild(chip);
     }
     this._hello.appendChild(chips);
-    this._drawSuggested();
   }
 
-  // Suggested routines: each runs once per tap; the fifth tap keeps it (suggestions.py).
-  _drawSuggested() {
+  // A routine made while the dashboard is open shows up without a reload: look again every five minutes.
+  connectedCallback() {
+    this._suggTimer = setInterval(async () => {
+      if (!this._hass || !this._sugg || this._answering) return;
+      try { this._suggested = await this._hass.callWS({ type: "console/suggestions" }); this._drawSuggested(); } catch (e) { /* next time */ }
+    }, 300000);
+  }
+
+  disconnectedCallback() { clearInterval(this._suggTimer); }
+
+  // Suggested routines (suggestions.py): each is already running. Keep makes it an ordinary routine; Undo removes
+  // it. Their own strip above the chat, so they show whatever the chat is doing (owner, 2026-11-28: "they should
+  // pop up as buttons on the home page").
+  _drawSuggested(said) {
     const got = this._suggested;
-    if (!got || !(got.items || []).length) return;
-    const box = el("div", "suggested");
-    box.appendChild(el("div", "label", "Suggested routines"));
-    for (const item of got.items) {
+    const items = (got && got.items) || [];
+    this._sugg.replaceChildren();
+    this._sugg.hidden = !items.length && !said;
+    if (items.length) this._sugg.appendChild(el("div", "label", "New routines Console made"));
+    for (const item of items) {
       const row = el("div", "sugg");
-      const chip = el("button", "chip", `\u25B6 ${item.name}  ${item.taps}/${item.keep_after}`);
-      chip.type = "button";
-      chip.title = "Run it once. After " + item.keep_after + " runs it runs by itself.";
-      chip.addEventListener("click", () => this._tap(item));
-      row.appendChild(chip);
+      const words = el("div", "words");
+      words.appendChild(el("div", "name", item.name));
+      if (item.description) words.appendChild(el("div", "why", item.description));
+      row.appendChild(words);
       if (got.is_admin) {
-        const x = el("button", "x", "\u2715"); x.type = "button"; x.title = "Don't suggest this"; x.setAttribute("aria-label", `Don't suggest ${item.name}`);
-        x.addEventListener("click", () => this._dismiss(item));
-        row.appendChild(x);
+        const keep = el("button", "chip keep", "Keep"); keep.type = "button"; keep.title = "It's running now. Keep it as a routine.";
+        keep.addEventListener("click", () => this._answer(item, "keep"));
+        const undo = el("button", "chip", "Undo"); undo.type = "button"; undo.title = "Remove it. It won't be suggested again.";
+        undo.setAttribute("aria-label", `Undo ${item.name}`);
+        undo.addEventListener("click", () => this._answer(item, "dismiss"));
+        const acts = el("div", "acts"); acts.appendChild(keep); acts.appendChild(undo);
+        row.appendChild(acts);
       }
-      if (item.description) row.appendChild(el("div", "why", item.description));
-      box.appendChild(row);
+      this._sugg.appendChild(row);
     }
-    this._hello.appendChild(box);
+    if (said) this._sugg.appendChild(el("div", "why", said));
   }
 
-  async _tap(item) {
-    if (this._busy) return;
-    this._busy = true;
-    this._hello.remove();
-    this._log.appendChild(this._turn("me", `Run \u201c${item.name}\u201d`).node);
-    try {
-      const done = await this._hass.callWS({ type: "console/suggestions/tap", suggestion_id: item.id });
-      this._log.appendChild(this._turn("it", done.reply).node);
-    } catch (e) { this._log.appendChild(this._turn("it", String(e.message || e), { error: true }).node); }
-    this._busy = false;
-    this._log.scrollTop = this._log.scrollHeight;
-    try { this._suggested = await this._hass.callWS({ type: "console/suggestions" }); } catch (e) { /* keep what's shown */ }
-    this._drawTop();
-  }
-
-  async _dismiss(item) {
-    try { await this._hass.callWS({ type: "console/suggestions/dismiss", suggestion_id: item.id }); } catch (e) { /* it's gone already */ }
+  async _answer(item, what) {
+    if (this._answering) return;
+    this._answering = true;
+    let said = "";
+    try { said = (await this._hass.callWS({ type: `console/suggestions/${what}`, suggestion_id: item.id })).reply || ""; }
+    catch (e) { said = String(e.message || e); }
+    this._answering = false;
     try { this._suggested = await this._hass.callWS({ type: "console/suggestions" }); } catch (e) { this._suggested = null; }
-    this._drawHello();
+    this._drawSuggested(said);
   }
 
   _newChat() {

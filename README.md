@@ -33,7 +33,7 @@ Until then the card says the cloud agent isn't connected, and plain commands sti
 ## How a request is answered
 
 1. Home Assistant's own agent: built-in sentences and the household's learned ones. Free, on the home network.
-2. `deepseek/deepseek-v4.1-flash` with thinking off, for a plain device command.
+2. `deepseek/deepseek-v4.1-flash` with thinking off, for a plain device command (and for suggested routines).
 3. `deepseek/deepseek-v4.1-flash` with a little thinking, for everything else.
 4. `deepseek/deepseek-v4-pro-0813`, only when step 2 or 3 fails or hands a hard request up.
 
@@ -42,26 +42,32 @@ longer than a key lasts, or the model fails) the person is told so, and step 1 k
 
 ## Suggested routines
 
-An administrator can turn on **Weekly suggestions** on the Console page, under Settings. It's off unless
-someone turns it on, because each run uses some of the month's credits (the Plan tab shows how many).
+Console listens to the house and makes routines from what it hears. An administrator turns it on on the
+Console page, under Settings. It's off unless someone turns it on, because a run that makes a routine uses
+some of the month's credits (the Plan tab shows how many).
 
-- Every Monday at 3 AM (the house's time) Console's cloud agent follows Sunrise's `routines` skill to suggest
-  up to 3 routines from how the house is used. Sunrise saves each one as a real automation, **switched
-  off** and labelled **Suggested**, so it can't fire on its own. It never suggests anything with a lock,
-  alarm, garage door, heating or sound, or anything not exposed to Assist.
-- The suggestions show in the chat card. A tap runs one once and reads back what changed. On the **fifth
-  tap** it's kept: an ordinary automation that runs on its own trigger, which Sunrise's `undo` can still take back.
-- A suggestion nobody taps for 7 days is removed, and so is one an administrator removes (✕). Either way
-  it's never suggested again.
-- It isn't throttled: it runs whenever the cloud agent can be used, and is skipped only when it can't
-  (switched off, unlinked, or the month's allowance used up). **Suggest now** on the Console page runs it at once.
-- Needs Sunrise 0.3.0 or newer (its `routine` tool's `suggest`, `keep` and `dismiss`).
+- **Every hour** Console asks Sunrise what the house heard: a door, window, motion or presence sensor
+  changed (or someone came or went), and a person switched a light, switch, fan or cover by hand within
+  two minutes, on at least 4 different days and 6 times in 10. Reading that uses no model, so an hour with
+  nothing new uses no credits.
+- **Every Monday at 3 AM** (the house's time) the cloud agent also follows Sunrise's `routines` skill to
+  look at how the house is used as a whole.
+- Both runs use `deepseek/deepseek-v4.1-flash` with thinking off, and are never handed to the stronger model.
+- Sunrise saves each one as a real automation, **running at once** and labelled **Suggested**, limited to
+  the hours it actually happens in. It never makes one with a lock, alarm, garage door, heating or sound,
+  or anything not exposed to Assist.
+- They show at the top of the Home dashboard, in the chat card, never as notifications. An administrator
+  presses **Keep** (it's an ordinary automation from then on) or **Undo** (it's removed, and never
+  suggested again). At most 3 wait for an answer at a time.
+- A run is skipped only when the cloud agent can't be used (switched off, unlinked, or the month's
+  allowance used up). **Suggest now** on the Console page runs Monday's look at once.
+- Needs Sunrise 0.4.0 or newer (its `usage` tool's `follows`, and its `routine` tool's `suggest` with `on`).
 
 ## Where the credits went
 
 The Console page's Plan tab has **Where it went**: a pie of this month's credits by where the requests
-came from (the chat card, voice, Assist in the app, weekly suggestions, automations and scripts), with
-a legend that also lists what spends no credits (taps on suggested routines, Claude and other agents,
+came from (the chat card, voice, Assist in the app, suggested routines, automations and scripts), with
+a legend that also lists what spends no credits (Claude and other agents,
 requests while support mode was on). It's kept on the box and isn't part of the summary that is sent out.
 
 At 80% and at 100% of the month's credits, Home Assistant shows a notification, and each phone with the

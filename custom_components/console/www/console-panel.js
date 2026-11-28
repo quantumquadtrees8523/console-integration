@@ -42,7 +42,7 @@ const STYLE = `
   .sw.free { background: none; border: 1.5px solid var(--divider-color); box-sizing: border-box; }
 `;
 
-const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Weekly suggestions", style: "Weekly reply style", automations: "Automations and scripts",
+const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Suggested routines", style: "Weekly reply style", automations: "Automations and scripts",
   suggestion_taps: "Taps on suggested routines", claude: "Claude and other agents", support: "While support mode was on" };
 const PATH_NOTES = { suggestion_taps: "they run at home", claude: "on your own Claude plan", support: "Console's operator, or anyone's Claude while it was on" };
 const credits = (n) => `${n} credit${Number(n) === 1 ? "" : "s"}`;
@@ -262,15 +262,15 @@ class ConsolePanel extends HTMLElement {
     if (!g.available) return `<section><h2>Suggested routines</h2><p class="soft">Suggested routines need Sunrise, and it isn't installed.</p></section>`;
     const last = g.last_run;
     const lastLine = last ? (last.ran ? `Last run ${dayTime(last.at)}: ${last.made} new, ${credits(Math.round((last.cost_usd || 0) * 1000) / 10)} used.` : `Last run ${dayTime(last.at)} was skipped (${esc(last.why)}).`) : "It hasn't run yet.";
-    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} of ${i.keep_after} runs${admin ? ` <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
+    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}<div class="soft">${esc(i.description || "")}</div></td><td>running${admin ? ` <button class="act" data-do="sugg-keep" data-id="${esc(i.id)}">Keep</button> <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Undo</button>` : ""}</td></tr>`).join("");
     const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">kept ${dayTime(k.at)}</td></tr>`).join("");
     return `<section><h2>Suggested routines</h2>
-        <p><b>Weekly suggestions: ${g.on ? "on" : "off"}</b></p>
-        <p class="soft">Every Monday at 3 AM Console's cloud agent looks at how the house is used and suggests up to 3 routines in the chat. A suggestion is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it. After 5 taps it's kept and runs by itself. One nobody taps for 7 days is removed, and a removed one is never suggested again.</p>
+        <p><b>Suggested routines: ${g.on ? "on" : "off"}</b></p>
+        <p class="soft">Console listens to the house. Every hour it checks what the house heard (a door opened or someone came home, and a light was switched by hand right after, on at least 4 days and 6 times in 10), and every Monday at 3 AM it looks at how the house is used. When something is clearly a habit it makes the routine with Flash, thinking off: a real automation, running at once and labelled “Suggested”. It shows at the top of Home, in the chat card, with Keep and Undo. At most 3 wait for an answer at a time, and one you undo is never suggested again. Never a lock, alarm, garage door, heating or sound.</p>
         <div class="note">${esc(g.cost_note)}</div>
-        ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn weekly suggestions off" : "Turn weekly suggestions on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
+        ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn suggested routines off" : "Turn suggested routines on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
         <p class="soft">${esc(lastLine)}</p>
-        ${items ? `<table>${items}</table>` : `<p class="soft">No suggestions waiting.</p>`}
+        ${items ? `<table>${items}</table>` : `<p class="soft">None waiting for an answer.</p>`}
         ${kept ? `<h2 style="margin-top:16px">Kept</h2><table>${kept}</table><p class="soft">A kept routine is an ordinary automation: change or remove it under Settings → Automations, or ask the chat to undo it.</p>` : ""}
         <p class="soft">${esc(this._suggSaid || "")}</p></section>`;
   }
@@ -321,10 +321,11 @@ class ConsolePanel extends HTMLElement {
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
       else if (what === "sugg-set") {
-        if (at.on === "1" && !confirm("Turn weekly suggestions on? Each Monday's run uses some of this month's credits. The Plan tab shows what it used.")) return;
+        if (at.on === "1" && !confirm("Turn suggested routines on? Console will make routines from what the house hears, running at once, with Keep and Undo on Home. A run that makes one uses some of this month's credits; the Plan tab shows what it used.")) return;
         await this._ws({ type: "console/suggestions/set", on: at.on === "1" }); this._suggSaid = "";
       }
       else if (what === "sugg-run") { this._suggSaid = "Looking at the house…"; this._draw(); const r = await this._ws({ type: "console/suggestions/run" }); this._suggSaid = r.ran ? `${r.made} new suggestion${r.made === 1 ? "" : "s"}.` : `Skipped: ${r.why}.`; }
+      else if (what === "sugg-keep") { const r = await this._ws({ type: "console/suggestions/keep", suggestion_id: at.id }); this._suggSaid = r.reply; }
       else if (what === "sugg-dismiss") { const r = await this._ws({ type: "console/suggestions/dismiss", suggestion_id: at.id }); this._suggSaid = r.reply; }
       else if (what === "relink") { await this._ws({ type: "console/relink" }); this._wipeSaid = "Connected again. The cloud agent comes back when the relay next checks in."; }
       else if (what === "wipe") {

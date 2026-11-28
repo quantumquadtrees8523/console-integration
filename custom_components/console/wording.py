@@ -122,42 +122,29 @@ def handoff(args: dict[str, Any]) -> str:
 
 # --- suggested routines --------------------------------------------------------------------------
 
-SUGGESTIONS_ON_TITLE = "Weekly suggestions are on"
+SUGGESTIONS_ON_TITLE = "Suggested routines are on"
 SUGGESTIONS_ON = (
-    "Every Monday at 3 AM Console's cloud agent looks at how your house is used and suggests a few routines in "
-    "the chat. Each run uses some of this month's credits: see what it used on the [Console page](/console), "
-    "under Where it went. Turn it off any time under Settings."
+    "Console now listens to the house. Every hour it checks what the house heard (a door opened, then someone "
+    "switched a light), and every Monday at 3 AM it looks at how the house is used. When something is clearly a "
+    "habit it makes the routine, running at once, and shows it at the top of Home with Keep and Undo. A run that "
+    "makes one uses some of this month's credits: see what it used on the [Console page](/console), under Where "
+    "it went. Turn it off any time under Settings."
 )
 SUGGESTIONS_COST = (
-    "Each Monday's run uses some of this month's credits. The Plan tab shows what it used, under Where it went."
+    "An hour with nothing new uses no credits. A run that makes a routine, and each Monday's run, uses some of "
+    "this month's credits. The Plan tab shows what it used, under Where it went."
 )
 SUGGESTIONS_NO_SUNRISE = "Suggested routines need Sunrise, and it isn't installed."
 SUGGESTION_GONE = "That suggestion isn't here any more."
-SUGGESTION_DIDNT_RUN = "That suggestion didn't run. Nothing changed."
+SUGGESTION_NOT_KEPT = "That one couldn't be kept just now. It's still running; try again."
 
 
-def _what_changed(things: list[dict[str, Any]]) -> str:
-    shown = [f"{t.get('name') or t.get('id')} is {t.get('now')}" for t in things[:4] if t.get("now") not in (None, "missing")]
-    return (", ".join(shown) + ".") if shown else ""
-
-
-def suggestion_ran(name: str, things: list[dict[str, Any]], taps: int, keep_after: int, kept: bool) -> str:
-    done = f"Done: “{name}” ran. {_what_changed(things)}".strip()
-    if kept:
-        return (
-            f"{done} That's {keep_after} times, so it's yours now: it runs by itself from here on. "
-            "To take it back, say “undo that routine” or remove it under Settings → Automations."
-        )
-    left = keep_after - taps
-    return f"{done} Tap it {left} more time{'s' if left != 1 else ''} and it runs by itself."
-
-
-def suggestion_tapped(name: str) -> str:
-    return f"Run \u201c{name}\u201d"
+def suggestion_kept(name: str) -> str:
+    return f"Kept “{name}”. It's an ordinary routine now: change or remove it under Settings → Automations."
 
 
 def suggestion_dismissed(name: str) -> str:
-    return f"Removed “{name}”. I won't suggest it again."
+    return f"Undone: “{name}” is removed. I won't suggest it again."
 
 
 # --- usage notifications (alerts.py) --------------------------------------------------------------

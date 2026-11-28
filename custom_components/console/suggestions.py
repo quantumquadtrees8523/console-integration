@@ -1,24 +1,29 @@
-"""Suggested routines: once a week (Mondays at 3 AM), Console's cloud agent looks at how the house is used and tees up a
-few routines in the chat card. Each one is a real Home Assistant automation that Sunrise saved switched
-off and labelled "Suggested" (Sunrise's `routine` op=suggest), so it can't fire on its own.
+"""Suggested routines. Console listens to the house and makes routines from what it hears (owner, 2026-11-28:
+"console has the ability to listen to the devices ... on a cron and be able to create routines based on that").
 
-- A tap runs it once (Sunrise's op=try, with read-back), as the person who tapped.
-- The fifth tap keeps it (op=keep): from then on it is an ordinary routine that runs on its own trigger,
-  and Sunrise's `undo` still takes it back.
-- No tap for EXPIRE_DAYS days, or a tap on ✕: it is removed (op=dismiss) and never suggested again.
-- At most MAX_LIVE suggestions exist at a time.
+- **Every hour** (LISTEN_MINUTE past) Console asks Sunrise what the house heard (`usage`'s `follows`: a door,
+  motion sensor or person changed, and someone switched a thing by hand right after, often enough). No model
+  is used for that, so an hour with nothing new costs nothing. When there is a pattern Console hasn't
+  suggested or been told no to, the cloud agent saves its routine.
+- **Every Monday at 3 AM** the cloud agent also looks at how the house is used as a whole (the `routines`
+  skill, "Suggesting routines") for habits by the clock.
+- Both runs are **Flash with thinking off, never the stronger model** (conversation.py; "made using the flash
+  model never reasoning").
+- A suggestion is a real automation Sunrise saved **running** and labelled "Suggested" (`routine` op=suggest
+  on=true; "once its on its on and should be running"). It shows as buttons at the top of the Home dashboard,
+  in the chat card: **Keep** (op=keep: an ordinary routine, off the card) or **Undo** (op=dismiss: removed, and
+  never suggested again). Nothing is put in notifications.
+- At most MAX_LIVE wait for an answer at a time; a new one is made only when there's room.
 
-The weekly run is a setting, off unless an administrator turns it on, because each run spends some of
-the month's allowance; what it spent shows on the Plan tab under "Where it went". It isn't throttled: it
-runs whenever the cloud agent can be used, and is skipped only when it can't (switched off, unlinked, or
-the month's allowance used up).
-Console keeps, per suggestion: its automation id and name, a fingerprint of what it does, when it was
-made, and the taps. Nothing a person said. Only counts leave the box.
+It's a setting, off unless an administrator turns it on, because a run that saves something spends some of
+the month's allowance; what it spent shows on the Plan tab under "Where it went".
+Console keeps, per suggestion: its automation id and name, a fingerprint of what it does and when it was
+made. Nothing a person said. Only counts leave the box.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import hashlib
 import json
 import logging
@@ -29,27 +34,34 @@ from homeassistant.helpers import llm
 from homeassistant.helpers.event import async_track_time_change
 
 from . import wording
-from .const import DOMAIN, LLM_API_SUNRISE, PATH_SUGGESTIONS, PATH_TAPS
+from .const import DOMAIN, LLM_API_SUNRISE, PATH_SUGGESTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
 MAX_LIVE = 3
-KEEP_AFTER = 5
-EXPIRE_DAYS = 7
 RUN_AT = (0, 3, 0)  # Monday (weekday 0), 3:00 local time, when the house is quiet
+LISTEN_MINUTE = 17  # every hour at this minute: what did the house hear?
 NEVER_KEPT = 200
 
 RUN_PROMPT = (
     "Suggest up to {n} routines for this house from how it is used. Follow the routines skill (get_skill name=routines), "
     "its section “Suggesting routines”, exactly: read memory, list the routines, read usage, then save each one "
-    "with routine op=suggest. Never act, try or keep anything now: nobody is here, and nothing in the house may change "
-    "now. Don't suggest these again, the household didn't want them: {never}. Already suggested: {live}. If nothing "
+    "with routine op=suggest and on=true: the owner wants suggestions live, running from the moment they're saved. "
+    "Never act, try or keep anything now. Don't suggest these again, the household didn't want them: {never}. Already suggested: {live}. If nothing "
     "has enough evidence, suggest nothing. Reply with one line: how many you suggested."
 )
 
 
+LISTEN_PROMPT = (
+    "The house heard these patterns: something changed, and someone did the same thing by hand right after, often "
+    "enough to be a habit. The owner wants suggestions live. For each one, call routine with op=suggest, on=true and "
+    "its config exactly as given (you may only make alias and description read more naturally). Never act, try or keep "
+    "anything. Reply with one line: how many you saved.\n\n{routines}"
+)
+
+
 def fresh() -> dict[str, Any]:
-    return {"on": False, "items": [], "never": [], "kept": [], "last_run": None, "counts": {}}
+    return {"on": False, "items": [], "never": [], "kept": [], "made": [], "last_run": None, "counts": {}}
 
 
 def fingerprint(config: dict[str, Any]) -> str:
@@ -78,13 +90,22 @@ class Suggestions:
 
     @callback
     def start(self) -> None:
-        self._stop = async_track_time_change(self.hass, self._weekly, hour=RUN_AT[1], minute=RUN_AT[2], second=0)
+        self._stop = [
+            async_track_time_change(self.hass, self._weekly, hour=RUN_AT[1], minute=RUN_AT[2], second=0),
+            async_track_time_change(self.hass, self._hourly, minute=LISTEN_MINUTE, second=0),
+        ]
 
     @callback
     def stop(self) -> None:
-        if self._stop:
-            self._stop()
-            self._stop = None
+        for stop in self._stop or []:
+            stop()
+        self._stop = None
+
+    async def _hourly(self, now: datetime) -> None:
+        try:
+            await self.listen()
+        except Exception:  # noqa: BLE001 (a failed hour mustn't stop the next one)
+            _LOGGER.exception("Console: the hourly listen failed")
 
     async def _weekly(self, now: datetime) -> None:
         if now.weekday() != RUN_AT[0]:
@@ -112,8 +133,8 @@ class Suggestions:
 
     # --- talking to Sunrise -----------------------------------------------------------------------
 
-    async def _routine(self, args: dict[str, Any], user_id: str | None = None) -> dict[str, Any]:
-        """Sunrise's routine tool, as the person who tapped (or as nobody, for the weekly run)."""
+    async def _routine(self, args: dict[str, Any], user_id: str | None = None, tool: str = "routine") -> dict[str, Any]:
+        """One of Sunrise's tools (routine, unless named), as the person who pressed (or as nobody, for a run)."""
         ctx = llm.LLMContext(
             platform=DOMAIN, context=Context(user_id=user_id), language=self.hass.config.language,
             assistant="conversation", device_id=None,
@@ -122,7 +143,7 @@ class Suggestions:
             api = await llm.async_get_api(self.hass, LLM_API_SUNRISE, ctx)
         except Exception as error:  # noqa: BLE001 (Sunrise missing, or AI turned off)
             raise Refused(str(error) or wording.SUGGESTIONS_NO_SUNRISE) from error
-        result = await api.async_call_tool(llm.ToolInput(tool_name="routine", tool_args=args))
+        result = await api.async_call_tool(llm.ToolInput(tool_name=tool, tool_args=args))
         data = getattr(result, "data", result)
         return data if isinstance(data, dict) else {}
 
@@ -133,7 +154,7 @@ class Suggestions:
         return {
             "on": state["on"],
             "items": [
-                {k: item.get(k) for k in ("id", "name", "description", "taps", "made", "last_tap")} | {"keep_after": KEEP_AFTER}
+                {k: item.get(k) for k in ("id", "name", "description", "made")}
                 for item in state["items"]
             ],
             "kept": list(state["kept"])[-20:],
@@ -145,10 +166,29 @@ class Suggestions:
         month = self.state["counts"].setdefault(self.data.period, {})
         month[what] = month.get(what, 0) + 1
 
-    # --- the weekly run --------------------------------------------------------------------------
+    # --- the runs --------------------------------------------------------------------------------
 
-    async def run(self, *, force: bool = False) -> dict[str, Any]:
-        """Tidy up, then ask the cloud agent for new suggestions up to MAX_LIVE."""
+    async def listen(self) -> dict[str, Any]:
+        """The hourly listen: read what Sunrise heard (no model), and only if there's a pattern Console hasn't
+        suggested, kept or been told no to, have the cloud agent save it."""
+        state = self.state
+        if not state["on"] or self.running or self.data.cloud_state() not in ("ok", "near_limit"):
+            return {"ran": False, "why": "off" if not state["on"] else "not now"}
+        if len(state["items"]) >= MAX_LIVE:
+            return {"ran": False, "why": "full"}
+        try:
+            used = await self._routine({"days": 14}, tool="usage")
+        except Refused:
+            return {"ran": False, "why": "no Sunrise"}
+        seen = {n["fingerprint"] for n in state["never"]} | {i["fingerprint"] for i in state["items"]} | set(state["made"])
+        new = [p["routine"] for p in used.get("follows") or [] if isinstance(p.get("routine"), dict) and fingerprint(p["routine"]) not in seen]
+        if not new:
+            return {"ran": False, "why": "nothing new"}
+        return await self.run(heard=new)
+
+    async def run(self, *, force: bool = False, heard: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Tidy up, then ask the cloud agent for new suggestions up to MAX_LIVE: the routines the house heard
+        (`heard`, from the hourly listen), or what it finds in how the house is used (the weekly run)."""
         state = self.state
         if not state["on"] and not force:
             return {"ran": False, "why": "off"}
@@ -160,14 +200,13 @@ class Suggestions:
         self.running = True
         try:
             await self.reconcile()
-            await self.expire()
             room = MAX_LIVE - len(state["items"])
             if room <= 0:
                 return self._ran(False, "full")
             from homeassistant.components import conversation  # noqa: PLC0415
 
             before = self.data.spend_usd
-            text = RUN_PROMPT.format(
+            text = LISTEN_PROMPT.format(routines=json.dumps(heard[:room], ensure_ascii=False)) if heard else RUN_PROMPT.format(
                 n=room,
                 never=", ".join(f"“{n['name']}”" for n in state["never"][-30:]) or "none",
                 live=", ".join(f"“{i['name']}”" for i in state["items"]) or "none",
@@ -178,6 +217,8 @@ class Suggestions:
                 await conversation.async_converse(self.hass, text, None, context, self.hass.config.language, agent_id="conversation.console")
             finally:
                 self.data.via.pop(context.id, None)
+            # Offered once: a pattern Sunrise refused (a lock, something not exposed) isn't paid for again every hour.
+            state["made"] = (state["made"] + [fingerprint(r) for r in (heard or [])[:room]])[-NEVER_KEPT:]
             made = await self.reconcile()
             return self._ran(True, None, made=made, cost=round(self.data.spend_usd - before, 6))
         finally:
@@ -215,22 +256,13 @@ class Suggestions:
                     "description": config.get("description") or "",
                     "fingerprint": mark,
                     "made": self.data.now().isoformat(),
-                    "taps": 0,
-                    "last_tap": None,
                 }
             )
+            state["made"] = (state["made"] + [mark])[-NEVER_KEPT:]
             self._count("suggested")
             new += 1
         self.data.changed()
         return new
-
-    async def expire(self) -> int:
-        """Remove the suggestions nobody has tapped for EXPIRE_DAYS days."""
-        cutoff = self.data.now() - timedelta(days=EXPIRE_DAYS)
-        old = [i for i in self.state["items"] if datetime.fromisoformat(i.get("last_tap") or i["made"]) < cutoff]
-        for item in old:
-            await self._drop(item, None, "expired")
-        return len(old)
 
     async def _drop(self, item: dict[str, Any], user_id: str | None, why: str) -> None:
         try:
@@ -251,34 +283,19 @@ class Suggestions:
             raise Refused(wording.SUGGESTION_GONE)
         return item
 
-    async def tap(self, sid: str, user_id: str) -> dict[str, Any]:
-        """Run it once; on the KEEP_AFTER-th tap, keep it."""
+    async def keep(self, sid: str, user_id: str) -> dict[str, Any]:
+        """Keep: it's an ordinary routine from here on, and leaves the card."""
         item = self._item(sid)
-        tried = await self._routine({"op": "try", "id": sid}, user_id)
-        if tried.get("error") or not tried.get("ran"):
-            raise Refused(str(tried.get("error") or tried.get("why") or wording.SUGGESTION_DIDNT_RUN))
-        item["taps"] = int(item.get("taps") or 0) + 1
-        item["last_tap"] = self.data.now().isoformat()
-        self._count("tapped")
-        self.data.count_path(PATH_TAPS)
-        things = tried.get("things") or []
-        kept = None
-        if item["taps"] >= KEEP_AFTER:
-            kept = await self._routine({"op": "keep", "id": sid}, user_id)
-            if kept.get("ok"):
-                state = self.state
-                state["items"] = [i for i in state["items"] if i["id"] != sid]
-                state["kept"].append({"name": item["name"], "entity_id": kept.get("entity_id"), "change_id": kept.get("change_id"),
-                                      "at": self.data.now().isoformat()})
-                self._count("kept")
+        kept = await self._routine({"op": "keep", "id": sid}, user_id)
+        if kept.get("error") or not kept.get("ok"):
+            raise Refused(str(kept.get("error") or kept.get("why") or wording.SUGGESTION_NOT_KEPT))
+        state = self.state
+        state["items"] = [i for i in state["items"] if i["id"] != sid]
+        state["kept"].append({"name": item["name"], "entity_id": kept.get("entity_id"), "change_id": kept.get("change_id"),
+                              "at": self.data.now().isoformat()})
+        self._count("kept")
         self.data.changed()
-        return {
-            "name": item["name"],
-            "reply": wording.suggestion_ran(item["name"], things, item["taps"], KEEP_AFTER, bool(kept and kept.get("ok"))),
-            "taps": item["taps"],
-            "kept": bool(kept and kept.get("ok")),
-            "things": things,
-        }
+        return {"ok": True, "name": item["name"], "reply": wording.suggestion_kept(item["name"])}
 
     async def dismiss(self, sid: str, user_id: str) -> dict[str, Any]:
         item = self._item(sid)
@@ -286,7 +303,7 @@ class Suggestions:
         return {"ok": True, "reply": wording.suggestion_dismissed(item["name"])}
 
     async def dismiss_all(self) -> int:
-        """Remove every live suggestion (the data wipe): nothing switched off is left behind in automations."""
+        """Remove every suggestion still waiting for an answer (the data wipe): none is left running in automations."""
         items = list(self.state["items"])
         for item in items:
             try:
