@@ -1,10 +1,11 @@
-// The Console page in Home Assistant's sidebar.
-// Three tabs: "Plan and usage", "What the house knows about you", and "Settings".
+// Console settings, in Home Assistant's sidebar.
+// Four tabs: "Plan and usage", "What the house knows about you", "AI features" and "General".
 const CATEGORY_NAMES = { control: "Controlling things", status: "Questions about the house", customization: "Customizing", setup: "Setting up", troubleshooting: "Fixing problems", other: "Other" };
 const ROUTE_NAMES = { local: "Answered at home (no cloud)", flash_fast: "Cloud agent, quick", flash: "Cloud agent", pro: "Cloud agent, stronger model", fallback: "Cloud agent unavailable", other_agent: "Another agent (Claude)" };
 const AGENT_NAMES = { console: "Console", other_agents: "Other agents (Claude)" };
-const STATE_NAMES = { ok: "Working", near_limit: "Working, allowance running low", over_limit: "Paused until next month", not_linked: "Not connected", cloud_off: "Off: cloud access is turned off (Settings → Cloud access)", ai_off: "Off: AI is turned off (Settings → AI in this house)" };
-const TABS = [["plan", "Plan and usage"], ["knows", "What the house knows about you"], ["settings", "Settings"]];
+const STATE_NAMES = { ok: "Working", near_limit: "Working, allowance running low", over_limit: "Paused until next month", not_linked: "Not connected", cloud_off: "Off: cloud access is turned off (General → Cloud access)", ai_off: "Off: AI is turned off (General → AI in this house)" };
+const TABS = [["plan", "Plan and usage"], ["knows", "What the house knows about you"], ["features", "AI features"], ["settings", "General"]];
+const TITLE = "Console settings";
 
 const STYLE = `
   :host { display: block; background: var(--primary-background-color); min-height: 100vh; color: var(--primary-text-color); font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
@@ -40,10 +41,19 @@ const STYLE = `
   .where .legend { flex: 1; min-width: 240px; }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: baseline; }
   .sw.free { background: none; border: 1.5px solid var(--divider-color); box-sizing: border-box; }
+  .feature h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .tag { font-size: 12px; font-weight: 500; padding: 2px 10px; border-radius: 10px; border: 1px solid var(--divider-color); color: var(--secondary-text-color); white-space: nowrap; }
+  .tag.on { border-color: transparent; background: color-mix(in srgb, var(--success-color, #43a047) 20%, transparent); color: var(--primary-text-color); }
+  .tag.high { border-color: transparent; background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent); color: var(--primary-text-color); }
+  .tag.medium { border-color: transparent; background: color-mix(in srgb, var(--warning-color, #ffa600) 22%, transparent); color: var(--primary-text-color); }
+  .facts { margin: 10px 0 4px; }
+  .facts td:first-child { width: 150px; color: var(--secondary-text-color); padding-right: 12px; }
+  .facts td:last-child { text-align: left; white-space: normal; }
+  @media (max-width: 600px) { .facts td { display: block; width: auto !important; padding: 6px 0 0; } .facts td:last-child { border-top: 0; padding: 2px 0 8px; } }
 `;
 
 const PATH_NAMES = { chat: "Chat card", voice: "Voice", assist: "Assist in the app", suggestions: "Weekly suggestions", style: "Weekly reply style", automations: "Automations and scripts",
-  suggestion_taps: "Taps on suggested routines", claude: "Claude and other agents", support: "While support mode was on" };
+  suggestion_taps: "Taps on suggestions and quick actions", claude: "Claude and other agents", support: "While support mode was on" };
 const PATH_NOTES = { suggestion_taps: "they run at home", claude: "on your own Claude plan", support: "Console's operator, or anyone's Claude while it was on" };
 const credits = (n) => `${n} credit${Number(n) === 1 ? "" : "s"}`;
 const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -76,7 +86,10 @@ class ConsolePanel extends HTMLElement {
       if (this._tab === "plan") { try { this._paths = await this._ws({ type: "console/usage/paths" }); } catch (e) { this._paths = null; } }
       if (this._tab === "knows") this._knows = await this._ws({ type: "console/knows" });
       if (this._tab === "settings") this._backup = await this._ws({ type: "console/backup/status" });
-      if (this._tab === "settings") { try { this._sugg = await this._ws({ type: "console/suggestions" }); } catch (e) { this._sugg = null; } }
+      if (this._tab === "features") {
+        try { this._features = await this._ws({ type: "console/features" }); } catch (e) { this._features = null; }
+        try { this._sugg = await this._ws({ type: "console/suggestions" }); } catch (e) { this._sugg = null; }
+      }
     } catch (error) { this._status = { error: String(error.message || error) }; }
     this._draw();
   }
@@ -188,7 +201,7 @@ class ConsolePanel extends HTMLElement {
         <p class="soft">What Home Assistant thinks right now. To change who is tracked, or how: Settings → People.</p>${presence}
         <div class="row"><a href="/config/person">Open People</a></div></section>
       <section><h2>What you've asked</h2>
-        <p class="soft">What you and Console say in the chat card is kept on this box, so the conversation is still there after a reload. It never leaves the box, and each person signed in to Home Assistant has their own. Yours holds <b>${k.my_chat_messages}</b> message${k.my_chat_messages === 1 ? "" : "s"} (the newest 400 are kept).</p>
+        <p class="soft">What you and Console say in the chat card is kept on this box as chats, each with the work behind Console's replies (where a request went, its thinking, the tools it used), so a chat is still there when you open it again. It never leaves the box, and each person signed in to Home Assistant has their own. Yours hold <b>${k.my_chat_messages}</b> message${k.my_chat_messages === 1 ? "" : "s"} (your newest 40 chats are kept). To delete one chat, use ✕ beside it in the chat card's list.</p>
         <div class="row"><button class="act danger" data-do="chat-clear" ${k.my_chat_messages ? "" : "disabled"}>Delete my chat history</button></div>
         <p class="soft" style="margin-top:12px">Home Assistant itself also holds the last few voice requests in memory for its own debug view, until it restarts. Right now it holds <b>${k.assist_runs}</b>.</p>
         ${admin ? `<div class="row"><button class="act" data-do="assist-clear" ${k.assist_runs ? "" : "disabled"}>Clear them now</button></div>` : ""}</section>
@@ -200,7 +213,7 @@ class ConsolePanel extends HTMLElement {
         <pre>${esc(JSON.stringify(k.usage, null, 2))}</pre>
         <p class="soft"><b>2. What kind of thing each request was</b>, as a label from a fixed list, such as <code>lights.on_off</code> or <code>automations.create</code>. Console works the label out from what was done, not from your words. The relay adds these counts to one total for all houses together and does not keep them for this house. These are the counts on this box waiting to be sent:</p>
         <pre>${esc(JSON.stringify(k.topics || {}, null, 2))}</pre>
-        <p class="soft">To erase these counts along with everything else Console keeps, use Settings → Erase Console and Sunrise data.</p></section>
+        <p class="soft">To erase these counts along with everything else Console keeps, use General → Erase Console and Sunrise data.</p></section>
       <p class="soft">${esc(this._said)}</p>`;
   }
 
@@ -211,8 +224,8 @@ class ConsolePanel extends HTMLElement {
         <p class="soft">Console builds the Home dashboard from your house: the chat, then lights, speakers and the rest of what you've exposed to Assist. It keeps it up to date until you edit it by hand.</p>
         <div class="row"><a href="${esc((s.dashboard || {}).url || "/console-home")}">Open Home</a>${admin ? `<button class="act" data-do="rebuild">Rebuild it from the house</button>` : ""}</div>
         <p class="soft">${esc(this._said)}</p></section>
-      ${this._suggestionsSection(admin)}
       <section><h2>Off switches</h2>
+        <p class="soft">These two switch everything off at once. To switch off one use of AI and keep the rest, see the AI features tab.</p>
         <p><b>Cloud access: ${s.switches.cloud ? "on" : "off"}</b></p>
         <p class="soft">Off: this house is off Console's relay. Nothing reaches it from outside: no opening it away from home, no Claude through the connector, no access for Console's operator. And Console sends nothing out: its cloud agent is off, no key is renewed, no usage totals are reported. Plain commands still work. <b>It can only be turned back on from inside the house</b>, on your home network. It is not a firewall: other things on this box that use the internet by themselves (Home Assistant Cloud, a music service, HACS) carry on.</p>
         <div class="row"><button class="act ${s.switches.cloud ? "danger" : ""}" data-do="switch" data-entity="switch.console_cloud_access" data-on="${s.switches.cloud ? "0" : "1"}">${s.switches.cloud ? "Turn cloud access off" : "Turn cloud access on"}</button></div>
@@ -256,33 +269,70 @@ class ConsolePanel extends HTMLElement {
       <p class="soft">${esc(this._wipeSaid || "")}</p>`;
   }
 
-  _suggestionsSection(admin) {
+  // AI features: each use of Console's cloud agent, what it's for, what it tends to cost, what this house
+  // spent on it this month, and its own switch (features.py; the words come from the box).
+  _featuresTab(s) {
+    const f = this._features;
+    if (!f) return `<section><p class="soft">Loading…</p></section>`;
+    const admin = s.is_admin;
+    const used = (m) => {
+      if (!m.requests) return "Not used yet this month.";
+      const each = m.each ? `, about ${credits(m.each)} each` : "";
+      return `${m.requests} request${m.requests === 1 ? "" : "s"} · ${m.credits ? credits(m.credits) : "no credits"}${each}`;
+    };
+    const rows = f.features.map((x) => `<section class="feature">
+        <h2><span>${esc(x.name)}</span><span class="tag ${x.on ? "on" : ""}">${x.on ? "On" : "Off"}</span><span class="tag ${esc(x.level)}">${esc(x.level_name)}${x.level === "none" ? "" : " cost"}</span></h2>
+        <p>${esc(x.what)}</p>
+        <table class="facts">
+          <tr><td>What it tends to cost</td><td>${esc(x.cost)}</td></tr>
+          <tr><td>Used this month</td><td>${esc(used(x.this_month))}</td></tr>
+          <tr><td>If you turn it off</td><td>${esc(x.off.replace(/^Off: (.)/, (all, first) => first.toUpperCase()))}</td></tr>
+        </table>
+        ${admin ? `<div class="row"><button class="act ${x.on ? "danger" : ""}" data-do="feat" data-key="${esc(x.key)}" data-on="${x.on ? "0" : "1"}">${x.on ? "Turn it off" : "Turn it on"}</button>${x.key === "suggestions" ? `<button class="act" data-do="sugg-run">Suggest now</button>` : ""}</div>` : ""}
+        ${x.key === "suggestions" ? this._routines(admin) : ""}
+        ${x.key === "chips" ? this._chipRules() : ""}
+      </section>`).join("");
+    return `
+      <section><h2>AI features</h2>
+        <p class="soft">${esc(f.about)}</p>
+        <p class="soft">This month so far: ${f.credits.used} of ${credits(f.credits.allowed)}. The Plan and usage tab shows where they went.</p>
+        ${admin ? "" : `<p class="soft">Only a Home Assistant administrator can turn a feature on or off.</p>`}
+        <p class="soft">${esc(this._said)}</p></section>
+      ${rows}`;
+  }
+
+  // Under "Weekly suggested routines": the last run, the routines waiting or in use, and the ones kept.
+  _routines(admin) {
     const g = this._sugg;
     if (!g) return "";
-    if (!g.available) return `<section><h2>Suggested routines</h2><p class="soft">Suggested routines need Sunrise, and it isn't installed.</p></section>`;
+    if (!g.available) return `<p class="soft">Suggested routines need Sunrise, and it isn't installed.</p>`;
     const last = g.last_run;
     const lastLine = last ? (last.ran ? `Last run ${dayTime(last.at)}: ${last.made} new, ${credits(Math.round((last.cost_usd || 0) * 1000) / 10)} used.` : `Last run ${dayTime(last.at)} was skipped (${esc(last.why)}).`) : "It hasn't run yet.";
-    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} of ${i.keep_after} runs${admin ? ` <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
-    const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">kept ${dayTime(k.at)}</td></tr>`).join("");
-    return `<section><h2>Suggested routines</h2>
-        <p><b>Weekly suggestions: ${g.on ? "on" : "off"}</b></p>
-        <p class="soft">Every Monday at 3 AM Console's cloud agent looks at how the house is used and suggests up to 3 routines in the chat. A suggestion is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it. After 5 taps it's kept and runs by itself. One nobody taps for 7 days is removed, and a removed one is never suggested again.</p>
-        <div class="note">${esc(g.cost_note)}</div>
-        ${admin ? `<div class="row"><button class="act" data-do="sugg-set" data-on="${g.on ? "0" : "1"}">${g.on ? "Turn weekly suggestions off" : "Turn weekly suggestions on"}</button><button class="act" data-do="sugg-run">Suggest now</button></div>` : ""}
-        <p class="soft">${esc(lastLine)}</p>
-        ${items ? `<table>${items}</table>` : `<p class="soft">No suggestions waiting.</p>`}
-        ${kept ? `<h2 style="margin-top:16px">Kept</h2><table>${kept}</table><p class="soft">A kept routine is an ordinary automation: change or remove it under Settings → Automations, or ask the chat to undo it.</p>` : ""}
-        <p class="soft">${esc(this._suggSaid || "")}</p></section>`;
+    const items = (g.items || []).map((i) => `<tr><td>${esc(i.name)}${i.quick ? ` <span class="tag on">Quick action</span>` : ""}<div class="soft">${esc(i.description || "")}</div></td><td>${i.taps} tap${i.taps === 1 ? "" : "s"}${admin ? ` <button class="act" data-do="sugg-keep" data-id="${esc(i.id)}" data-name="${esc(i.name)}">Let it run by itself</button> <button class="act" data-do="sugg-dismiss" data-id="${esc(i.id)}">Remove</button>` : ""}</td></tr>`).join("");
+    const kept = (g.kept || []).slice().reverse().map((k) => `<tr><td>${esc(k.name)}</td><td class="soft">runs by itself since ${dayTime(k.at)}</td></tr>`).join("");
+    return `<p class="soft">${esc(lastLine)} A suggested routine is a real automation, switched off and labelled “Suggested”: it only runs when someone taps it in the chat. One nobody taps for ${g.rules.expire_days} days is removed and never suggested again.</p>
+        ${items ? `<table>${items}</table>` : `<p class="soft">No suggested routines waiting.</p>`}
+        ${kept ? `<h2 style="margin-top:16px">Running by themselves</h2><table>${kept}</table><p class="soft">These are ordinary automations now: change or remove one under Settings → Automations, or ask the chat to undo it.</p>` : ""}
+        <p class="soft">${esc(this._suggSaid || "")}</p>`;
+  }
+
+  _chipRules() {
+    const g = this._sugg;
+    if (!g || !g.rules) return "";
+    const r = g.rules;
+    const quick = (g.quick || []).map((q) => esc(q.name)).join(", ");
+    return `<p class="soft">The chat always shows ${r.shown}. Tap one ${r.promote_taps} times on ${r.promote_days} different days and it becomes a quick action under the chat (at most ${r.quick_max}). One you see ${r.discard_seen} times and never tap is put away for ${r.rest_days} days. A quick action nobody uses for ${r.quick_idle_days} days goes back to being a suggestion. They only switch lights, switches, fans and helpers you've exposed to Assist, or run one of your scenes.</p>
+        <p class="soft">${quick ? `Quick actions right now: ${quick}.` : "No quick actions yet."}</p>`;
   }
 
   _draw() {
     const s = this._status;
     if (!s) return;
     const root = this.shadowRoot;
-    if (s.error) { root.innerHTML = `<style>${STYLE}</style><header>Console</header><main><section><h2>Console didn't answer</h2><p class="soft">${esc(s.error)}</p></section></main>`; return; }
-    const body = this._tab === "plan" ? this._plan(s) : this._tab === "knows" ? this._knowsTab(s) : this._settings(s);
+    if (s.error) { root.innerHTML = `<style>${STYLE}</style><header>${TITLE}</header><main><section><h2>Console didn't answer</h2><p class="soft">${esc(s.error)}</p></section></main>`; return; }
+    const body = this._tab === "plan" ? this._plan(s) : this._tab === "knows" ? this._knowsTab(s) : this._tab === "features" ? this._featuresTab(s) : this._settings(s);
     root.innerHTML = `<style>${STYLE}</style>
-      <header><span id="menu"></span><span>Console</span></header>
+      <header><span id="menu"></span><span>${TITLE}</span></header>
       <nav>${TABS.map(([key, name]) => `<button data-tab="${key}" class="${key === this._tab ? "on" : ""}">${name}</button>`).join("")}</nav>
       <main>${s.support && s.support.on ? `<div class="note on">Support mode is on until ${dayTime(s.support.until)}. Console's operator can open this house.</div>` : ""}${body}
         <p class="soft" style="text-align:center">Console ${esc(s.version)}${s.sunrise ? " · with Sunrise" : " · Sunrise isn't installed"}</p>
@@ -320,9 +370,13 @@ class ConsolePanel extends HTMLElement {
       }
       else if (what === "backup-now") { const r = await this._ws({ type: "console/backup/now" }); this._backupSaid = `Started \u201c${r.name}\u201d. It appears under Settings → System → Backups when it's done.`; }
       else if (what === "support") { await this._ws({ type: "console/support/set", on: at.on === "1" }); this._said = ""; }
-      else if (what === "sugg-set") {
-        if (at.on === "1" && !confirm("Turn weekly suggestions on? Each Monday's run uses some of this month's credits. The Plan tab shows what it used.")) return;
-        await this._ws({ type: "console/suggestions/set", on: at.on === "1" }); this._suggSaid = "";
+      else if (what === "feat") {
+        if (at.key === "suggestions" && at.on === "1" && !confirm("Turn weekly suggested routines on? Each Monday's run uses some of this month's credits. This page shows what it used.")) return;
+        await this._ws({ type: "console/features/set", feature: at.key, on: at.on === "1" }); this._said = "";
+      }
+      else if (what === "sugg-keep") {
+        if (!confirm(`Let “${at.name}” run by itself? From now on it runs on its own trigger, without a tap. You can undo it from the chat.`)) return;
+        const r = await this._ws({ type: "console/suggestions/keep", suggestion_id: at.id }); this._suggSaid = r.reply;
       }
       else if (what === "sugg-run") { this._suggSaid = "Looking at the house…"; this._draw(); const r = await this._ws({ type: "console/suggestions/run" }); this._suggSaid = r.ran ? `${r.made} new suggestion${r.made === 1 ? "" : "s"}.` : `Skipped: ${r.why}.`; }
       else if (what === "sugg-dismiss") { const r = await this._ws({ type: "console/suggestions/dismiss", suggestion_id: at.id }); this._suggSaid = r.reply; }

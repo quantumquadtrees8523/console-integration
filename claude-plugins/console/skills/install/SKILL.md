@@ -74,7 +74,7 @@ Check, all of these:
 - `sensor.console_cloud_agent` is `not_linked` (it isn't linked yet).
 - `switch.console_cloud_agent` and `switch.console_ai` are both `on`.
 - A dashboard **Home** exists at `/console-home` and is the default.
-- A **Console** page is in the sidebar.
+- **Console settings** is in the sidebar.
 
 ## Step 5: link the house to Console's relay
 
@@ -117,7 +117,7 @@ Then in Home Assistant: Settings → Devices & services → the discovered **Mus
 With the test device the owner agreed to (read its state first):
 
 1. In the Home dashboard's chat card, a plain command ("turn off the <device>"). It should answer in
-   well under a second, and the Console page's "How they were answered" should count it under
+   well under a second, and Console settings' "How they were answered" should count it under
    **Answered at home (no cloud)**. Read the device back.
 2. A request the local agent can't do ("set the <device> to about half"). It should answer in a second
    or two with `Done. <device> is on at 50%.` Read the device back.

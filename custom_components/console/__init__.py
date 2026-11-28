@@ -74,7 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass,
             frontend_url_path=PANEL_URL,
             webcomponent_name="console-panel",
-            sidebar_title="Console",
+            sidebar_title=wording.PANEL_TITLE,
             sidebar_icon="mdi:home-heart",
             module_url=PANEL_JS,
             require_admin=False,

@@ -62,6 +62,6 @@ This link opens the dialog already filled in:
   finished, or the house's hub is offline. Open https://console-home.fly.dev : it should land in Home
   Assistant. If it says "Reaching your house…", the hub isn't connected.
 - **Every tool call says AI is turned off for this house:** someone turned off **AI in this house** on
-  the Console page in Home Assistant (Settings tab). Only someone in the house can turn it back on.
+  Console settings in Home Assistant (General tab). Only someone in the house can turn it back on.
 - **The tools list is empty or sign-in loops:** the box needs Console 0.4.0 or newer; older versions
   can't tell the relay which house a token belongs to.
