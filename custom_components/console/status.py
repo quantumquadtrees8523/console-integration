@@ -7,7 +7,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from . import dashboard, wording
+from . import dashboard, updates, wording
 from .const import VERSION
 from .credits import credits
 from .state import ConsoleData, next_reset
@@ -51,7 +51,8 @@ def status(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "sunrise": bool(sunrise),
         "support": {"on": data.support.on(), "until": data.data["support"].get("until"), "log": list(data.data["support"].get("log") or [])[-30:]},
         "unlinked": bool(data.data.get("unlinked")),
-        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai")},
+        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai"), "updates": data.switch("updates")},
+        "updates": updates.hacs_updates(hass),
         "agent": data.feature("agent"),
         "credits": {"used": credits(data.spend_usd), "allowed": credits(data.cap_usd)},
         "site": data.data.get("site"),

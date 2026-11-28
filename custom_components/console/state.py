@@ -68,7 +68,8 @@ def _fresh() -> dict[str, Any]:
         "dashboard": {},
         "made": {},  # dashboards made through the agent's `dashboard` tool, by url path
         "linked_at": None,
-        "switches": {"cloud": True, "ai": True},  # the off switches (cloud access, AI): on unless the household turns one off
+        # the off switches (cloud access, AI) and updates from Console's site: on unless the household turns one off
+        "switches": {"cloud": True, "ai": True, "updates": True},
         "site": None,  # the relay's address for this household, as the relay last gave it
         "unlinked": False,  # the household erased its data here: the relay is refused until they reconnect
         # What kind of thing each request was (topics.py), by month, not yet sent; and the batch being
@@ -189,7 +190,7 @@ class ConsoleData:
 
     @callback
     def set_switch(self, key: str, on: bool) -> None:
-        self.data.setdefault("switches", {"cloud": True, "ai": True})[key] = bool(on)
+        self.data.setdefault("switches", {"cloud": True, "ai": True, "updates": True})[key] = bool(on)
         self.changed()
 
     def feature(self, key: str) -> bool:

@@ -7,7 +7,10 @@
 - switch.console_ai: AI in this house. Off: no AI agent (Console's, Claude, any other) can use the
   house's tools. Only Home Assistant's own sentence matching answers.
 
-Neither is a firewall: other things on the box that use the internet by themselves (Home Assistant
+- switch.console_updates: updates from Console's site. On: Console's operator can install the latest release of
+  each integration HACS manages here, then restart Home Assistant (updates.py). Off: only someone at the house can.
+
+Neither of the first two is a firewall: other things on the box that use the internet by themselves (Home Assistant
 Cloud, a music service, HACS) are not affected by them.
 """
 
@@ -38,6 +41,7 @@ async def async_setup_entry(
         [
             KillSwitch(data, entry, "cloud", "switch.console_cloud_access", "Cloud access", "mdi:cloud-outline"),
             KillSwitch(data, entry, "ai", "switch.console_ai", "AI in this house", "mdi:robot-outline"),
+            KillSwitch(data, entry, "updates", "switch.console_updates", "Updates from Console's site", "mdi:update"),
         ]
     )
 

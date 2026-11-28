@@ -6,6 +6,8 @@
   batch of topic counts waiting to go (labels from a fixed list; the relay adds them to one total for
   all houses and tells this box in the next handover that it can forget the batch).
 - POST /api/console/relay/notify: show the household a notification.
+- POST /api/console/relay/update: install the latest release of each HACS integration that has one waiting,
+  then restart Home Assistant once (updates.py). Refused while switch.console_updates is off.
 
 The usage summary is counts and labels only (see state.ConsoleData.summary). No message, device name or
 room ever goes in it.
@@ -21,9 +23,11 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 
+from . import wording
 from .const import DOMAIN, VERSION
 from .state import ConsoleData
 from .status import status
+from .updates import hacs_updates, update_all
 
 
 def _admin(request: web.Request) -> bool:
@@ -41,7 +45,8 @@ def _report(hass: HomeAssistant, data: ConsoleData) -> dict[str, Any]:
         "usage": data.summary(),
         "support": {"on": data.support.on(), "until": data.data["support"].get("until")},
         "unlinked": bool(data.data.get("unlinked")),
-        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai")},
+        "switches": {"cloud": data.switch("cloud"), "ai": data.switch("ai"), "updates": data.switch("updates")},
+        "updates": [{k: r[k] for k in ("name", "version", "latest", "waiting")} for r in hacs_updates(hass)],
     }
 
 
@@ -155,3 +160,29 @@ class TokenView(HomeAssistantView):
         iss = request.query.get("iss", "")
         known = bool(iss) and hass.auth.async_get_refresh_token(iss) is not None
         return self.json({"known": known})
+
+
+class UpdateView(HomeAssistantView):
+    """Console's operator pressed Update for this house: install every waiting HACS release, read each version
+    back, and restart Home Assistant once after answering. The household allows it (switch.console_updates)."""
+
+    url = "/api/console/relay/update"
+    name = "api:console:relay:update"
+
+    async def post(self, request: web.Request) -> web.Response:
+        if not _admin(request):
+            return self.json_message("Administrators only.", 403)
+        hass: HomeAssistant = request.app["hass"]
+        data: ConsoleData = hass.data[DOMAIN]
+        if not data.switch("cloud"):
+            return self.json_message("Cloud access is turned off for this house.", 423)
+        if not data.switch("updates"):
+            return self.json_message(wording.UPDATES_OFF, 423)
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except ValueError:
+            return self.json_message("That wasn't JSON.", 400)
+        restart = bool((body or {}).get("restart", True)) if isinstance(body, dict) else True
+        done = await update_all(hass, data, "Console's operator", restart=restart)
+        await data.async_save_now()
+        return self.json(done)

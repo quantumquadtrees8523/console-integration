@@ -58,6 +58,7 @@ def async_setup(hass: HomeAssistant) -> None:
         ws_features,
         ws_features_set,
         ws_usage_paths,
+        ws_update_now,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -484,3 +485,16 @@ def ws_usage_paths(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
     rows = [{"path": p, "turns": got.get(p, {}).get("turns", 0), "spend_usd": round(got.get(p, {}).get("spend_usd", 0.0), 6),
              "credits": credits(got.get(p, {}).get("spend_usd", 0.0))} for p in PATHS]
     connection.send_result(msg["id"], {"period": data.period, "paths": rows, "credits_used": credits(data.spend_usd)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "console/update/now"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_update_now(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Update now in Console settings: every waiting HACS release, then one restart (updates.py)."""
+    from . import updates  # noqa: PLC0415
+
+    data = hass.data[DOMAIN]
+    done = await updates.update_all(hass, data, connection.user.name or "An administrator")
+    await data.async_save_now()
+    connection.send_result(msg["id"], done)
