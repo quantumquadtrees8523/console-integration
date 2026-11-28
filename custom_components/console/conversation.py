@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import logging
+import re
 import time
 from typing import Any, Literal
 
@@ -139,6 +140,40 @@ class Turn:
     calls: list[tuple[str, dict]] = field(default_factory=list)
     label: str | None = None
     model_calls: int = 0
+    changed: list[str] = field(default_factory=list)  # what this turn's tools changed, as card step titles
+    nudged: bool = False  # the reply claimed an action no tool made, and was sent back once
+
+
+# Tools, and ops of tools, that only read: a turn that used only these changed nothing in the house.
+READ_ONLY = {
+    "house_map", "audit", "changes", "usage", "memory_list", "memory_read", "list_skills", "get_skill",
+    "network_check", "log_run", "GetDateTime", "GetLiveContext", "about", "behavior_log", "diagnose_device",
+}  # fmt: skip
+READ_ONLY_OPS = {"list", "get", "check", "search", "library", "queue", "speakers", "status"}
+
+# A reply that says it did something. Only checked on a turn where no tool ran at all.
+_CLAIM = re.compile(
+    r"^\s*(?:all )?done\s*[.,!\u2014\u2013-]"
+    r"|\b(?:read (?:it )?back|i(?:'ve| have)? (?:turned|switched|set|started|stopped|paused|skipped|saved|"
+    r"made|added|removed|deleted|moved|played|dimmed|filed|scheduled|changed)|(?:turned|switched) (?:on|off)|"
+    r"skipped|paused|stopped|filed|is now (?:on|off|playing|at))\b",
+    re.IGNORECASE,
+)
+UNBACKED_NUDGE = (
+    "Your reply says something was done, but no tool ran in this turn, so nothing in the house changed. "
+    "Use your tools to do it now, or say plainly that you haven't done it."
+)
+
+
+def changes_from(name: str, args: dict[str, Any], failed: bool) -> str | None:
+    """A tool call that may have changed the house, as the card's step title; None for a read or a failure."""
+    if failed or name in READ_ONLY or str(args.get("op") or "") in READ_ONLY_OPS:
+        return None
+    return tool_step(name, args)[0]
+
+
+def claims_action(reply: str) -> bool:
+    return bool(_CLAIM.search(reply))
 
 
 async def async_setup_entry(
@@ -331,16 +366,16 @@ class ConsoleAgent(conversation.ConversationEntity):
             try:
                 await self._run(chat_log, inference, MODEL_FLASH, effort, turn, trail, escalate=route != ROUTE_FAST)
             except (openrouter.ModelError, Escalate) as why:
-                # Flash failed or handed it up: start the turn again on Pro.
+                # Flash failed or handed it up: Pro carries on from where Flash stopped, with every tool
+                # call and result so far, so nothing is done twice and no time is spent redoing it.
                 _LOGGER.info("Console: Flash gave the turn to Pro (%s)", type(why).__name__)
-                del chat_log.content[keep:]
-                turn.route, turn.calls, turn.label = ROUTE_PRO, [], None
+                turn.route, turn.label = ROUTE_PRO, None
                 trail.reset()
                 trail.step(
                     "Handed to the stronger model",
-                    "DeepSeek V4 Pro: the first model asked for help with this one."
+                    "DeepSeek V4 Pro: the first model asked for help with this one, so this one carries on."
                     if isinstance(why, Escalate)
-                    else "DeepSeek V4 Pro: the first model failed, so this one starts the request again.",
+                    else "DeepSeek V4 Pro: the first model failed, so this one carries on from where it stopped.",
                 )
                 await self._run(chat_log, inference, MODEL_PRO, EFFORT_FULL, turn, trail, escalate=False)
         except HandedOff as handed:
@@ -361,11 +396,12 @@ class ConsoleAgent(conversation.ConversationEntity):
             trail.step("The cloud agent stopped", "The model provider didn't accept this house's key")
             return self._say(user_input, chat_log, wording.NOT_LINKED_REPLY, ROUTE_FALLBACK, "other", False)
         except openrouter.ModelError as why:
+            # The tool calls and results stay in the chat log, so "continue" next turn starts from them,
+            # and the reply says what had already run instead of claiming nothing changed.
             _LOGGER.warning("Console: the cloud agent failed (%s)", why)
-            del chat_log.content[keep:]
             trail.reset()
             trail.step("The cloud agent failed", "Both models gave up on this request", ok=False)
-            return self._say(user_input, chat_log, wording.MODEL_FAILED_REPLY, turn.route, "other", False)
+            return self._say(user_input, chat_log, wording.model_failed(turn.changed), turn.route, "other", False)
         finally:
             self.data.others.mark_own(began, time.time())
 
@@ -501,8 +537,9 @@ class ConsoleAgent(conversation.ConversationEntity):
         offered.append(HANDOFF_TOOL)
         if escalate:
             offered.append(ESCALATE_TOOL)
+        nudge: list[dict[str, Any]] = []
         for _ in range(MAX_TOOL_ROUNDS if turn.route == ROUTE_FAST else MAX_TOOL_ROUNDS_FULL):
-            messages = [m for content in chat_log.content if (m := _to_message(content))]
+            messages = [m for content in chat_log.content if (m := _to_message(content))] + nudge
             gate = LabelGate()
 
             def on_delta(kind: str, piece: str, gate: LabelGate = gate) -> None:
@@ -537,6 +574,13 @@ class ConsoleAgent(conversation.ConversationEntity):
                 if not text:
                     raise openrouter.ModelError("empty answer")
                 reply, turn.label = router.split_label(text)
+                if not turn.calls and not turn.nudged and claims_action(reply):
+                    # Said it did something with no tool behind it: send it back once, outside the log.
+                    turn.nudged = True
+                    trail.reset()
+                    trail.step("Checked the reply", "It said something was done, but no tool ran. Sent back once.")
+                    nudge = [{"role": "assistant", "content": text}, {"role": "user", "content": UNBACKED_NUDGE}]
+                    continue
                 chat_log.async_add_assistant_content_without_tools(
                     conversation.AssistantContent(agent_id=self.entity_id, content=reply)
                 )
@@ -550,8 +594,11 @@ class ConsoleAgent(conversation.ConversationEntity):
                     conversation.AssistantContent(agent_id=self.entity_id, content=None, tool_calls=calls)
                 )
             ]
-            for key, result in zip(keys, results, strict=False):
+            nudge = []  # once a tool has run, the log itself carries the turn on
+            for key, call, result in zip(keys, calls, results, strict=False):
                 trail.end(key, result.result.data, bool(result.result.error))
+                if step := changes_from(_bare(call.tool_name), call.tool_args, bool(result.result.error)):
+                    turn.changed.append(step)
             if turn.route == ROUTE_FAST and (reply := confirmed_reply(calls, results)):
                 turn.label = "control"
                 rows = [row for result in results for row in result.result.data["results"]]

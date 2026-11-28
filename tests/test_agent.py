@@ -162,3 +162,75 @@ async def test_nothing_a_person_says_is_kept(hass, console, model):
     kept = json.dumps(console.data)
     assert "Priya" not in kept and "surprise" not in kept
     assert set(console.summary()) == {"period", "spend_usd", "turns", "ok", "failed", "by_route", "by_category", "by_agent"}
+
+
+async def test_when_flash_fails_midway_pro_carries_on_without_redoing_it(hass, console, model, lights_off):
+    link(console)
+    model.call_tool("assist__intent__HassTurnOff", {"name": "Kitchen light"})
+    model.fail(openrouter.ModelError("timeout"))
+    model.say("The kitchen is dark now. [[control]]")
+    reply = await ask(hass, "could you make the kitchen dark for the movie and tell me why it was on")
+    assert reply == "The kitchen is dark now."
+    assert len(lights_off) == 1  # done once, not again by Pro
+    assert [c["model"] for c in model.calls] == [MODEL_FLASH, MODEL_FLASH, MODEL_PRO]
+    assert model.calls[2]["messages"][-1]["role"] == "tool"  # Pro starts from Flash's result
+
+
+async def test_a_failed_turn_says_what_already_ran_and_continue_picks_it_up(hass, console, model, lights_off):
+    from homeassistant.components import conversation
+    from homeassistant.core import Context
+
+    link(console)
+    model.call_tool("assist__intent__HassTurnOff", {"name": "Kitchen light"})
+    model.fail(openrouter.ModelError("too many tool rounds"))
+    model.fail(openrouter.ModelError("too many tool rounds"))
+    first = await conversation.async_converse(
+        hass, "make the kitchen dark and set up a bedtime routine", None, Context(), agent_id="conversation.console"
+    )
+    words = first.response.speech["plain"]["speech"]
+    assert "Nothing" not in words and "TurnOff" in words and "continue" in words
+    assert console.summary()["failed"] == 1
+
+    model.say("Picking up: the routine is next. [[customization]]")
+    await conversation.async_converse(
+        hass, "continue", first.conversation_id, Context(), agent_id="conversation.console"
+    )
+    roles = [m["role"] for m in model.calls[-1]["messages"]]
+    assert "tool" in roles  # the earlier turn's tool result is still there to pick up from
+    assert len(lights_off) == 1
+
+
+async def test_a_failed_turn_that_changed_nothing_says_so(hass, console, model):
+    link(console)
+    model.fail(openrouter.ModelError("timeout"))
+    model.fail(openrouter.ModelError("timeout"))
+    assert await ask(hass, "what should I automate next in this house") == wording.MODEL_FAILED_REPLY
+
+
+async def test_a_reply_that_claims_an_action_no_tool_made_is_sent_back_once(hass, console, model, lights_off):
+    link(console)
+    model.say("Done, the kitchen light is off now. [[control]]")
+    model.call_tool("assist__intent__HassTurnOff", {"name": "Kitchen light"})
+    model.say("The kitchen light is off. [[control]]")
+    reply = await ask(hass, "could you make the kitchen dark for the movie")
+    assert reply == "The kitchen light is off."
+    assert len(lights_off) == 1
+    sent_back = model.calls[1]["messages"][-1]
+    assert sent_back["role"] == "user" and "no tool ran" in sent_back["content"]
+    assert all("no tool ran" not in str(m.get("content")) for m in model.calls[2]["messages"])
+
+
+async def test_a_claim_is_sent_back_only_once(hass, console, model):
+    link(console)
+    model.say("Done. [[control]]")
+    model.say("Done, I've turned it off. [[control]]")
+    reply = await ask(hass, "could you make the kitchen dark for the movie")
+    assert reply == "Done, I've turned it off."
+    assert len(model.calls) == 2
+
+
+async def test_a_plain_status_answer_is_not_sent_back(hass, console, model):
+    link(console)
+    model.say("The kitchen light is off. [[status]]")
+    await ask(hass, "is the kitchen light on or off right now, and since when")
+    assert len(model.calls) == 1

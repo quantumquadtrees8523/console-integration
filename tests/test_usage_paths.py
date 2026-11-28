@@ -31,7 +31,7 @@ async def test_each_request_is_counted_by_where_it_came_from(hass, console, mode
     # A voice speaker
     from homeassistant.components import conversation
 
-    model.say("Done. [[status]]")
+    model.say("The den is 20 degrees. [[status]]")
     await conversation.async_converse(hass, "how warm is the den", None, Context(), device_id="satellite-1", agent_id="conversation.console")
     # The chat card
     ws = await hass_ws_client(hass)
